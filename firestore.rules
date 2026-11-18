@@ -1,0 +1,249 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net — default deny everything not explicitly matched
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Hardened Global Primitives
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidMode(mode) {
+      return mode is string && mode in ['addition', 'subtraction', 'multiplication', 'division', 'mixed'];
+    }
+
+    function isValidDifficulty(difficulty) {
+      return difficulty is string && difficulty in ['easy', 'medium', 'hard'];
+    }
+
+    function isValidSessionType(sessionType) {
+      return sessionType is string && sessionType in ['sprint', 'streak', 'practice'];
+    }
+
+    // -------------------------------------------------------------------------
+    // Standalone Validation Blueprints (synchronized with firebase-blueprint.json)
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.uid == userId
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 40
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSessionRecord(data, userId, sessionId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'mode', 'difficulty', 'sessionType',
+          'durationSec', 'elapsedSec', 'score', 'attempted', 'correct',
+          'accuracy', 'bestStreak', 'avgResponseMs', 'qpm', 'allowNegatives', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'mode', 'difficulty', 'sessionType',
+          'durationSec', 'elapsedSec', 'score', 'attempted', 'correct',
+          'accuracy', 'bestStreak', 'avgResponseMs', 'qpm', 'allowNegatives', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && data.id == sessionId
+        && isValidId(data.userId)
+        && data.userId == request.auth.uid
+        && data.userId == userId
+        && isValidMode(data.mode)
+        && isValidDifficulty(data.difficulty)
+        && isValidSessionType(data.sessionType)
+        && data.durationSec is int && data.durationSec >= 0 && data.durationSec <= 3600
+        && (data.elapsedSec is int || data.elapsedSec is float) && data.elapsedSec >= 0 && data.elapsedSec <= 7200
+        && data.score is int && data.score >= 0 && data.score <= 5000
+        && data.attempted is int && data.attempted >= 0 && data.attempted <= 10000
+        && data.correct is int && data.correct == data.score && data.correct <= data.attempted
+        && (data.accuracy is int || data.accuracy is float) && data.accuracy >= 0 && data.accuracy <= 100
+        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= data.score
+        && data.avgResponseMs is int && data.avgResponseMs >= 0 && data.avgResponseMs <= 600000
+        && (data.qpm is int || data.qpm is float) && data.qpm >= 0 && data.qpm <= 600
+        && data.allowNegatives is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidLeaderboardEntry(data, entryId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'displayName', 'mode', 'difficulty', 'sessionType',
+          'durationSec', 'score', 'accuracy', 'bestStreak', 'avgResponseMs',
+          'qpm', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'displayName', 'mode', 'difficulty', 'sessionType',
+          'durationSec', 'score', 'accuracy', 'bestStreak', 'avgResponseMs',
+          'qpm', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.id == entryId
+        && isValidId(data.userId)
+        && data.userId == request.auth.uid
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 40
+        && isValidMode(data.mode)
+        && isValidDifficulty(data.difficulty)
+        && isValidSessionType(data.sessionType)
+        && data.durationSec is int && data.durationSec >= 0 && data.durationSec <= 3600
+        && data.id == (data.userId + '_' + data.mode + '_' + data.difficulty + '_' + data.sessionType + '_' + string(data.durationSec))
+        && data.score is int && data.score >= 1 && data.score <= 5000
+        && (data.accuracy is int || data.accuracy is float) && data.accuracy >= 0 && data.accuracy <= 100
+        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= data.score
+        && data.avgResponseMs is int && data.avgResponseMs >= 0 && data.avgResponseMs <= 600000
+        && (data.qpm is int || data.qpm is float) && data.qpm >= 0 && data.qpm <= 600
+        && data.isPublic is bool && data.isPublic == true
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 1: /users/{userId} — Private User Profile (PII Isolated)
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && isOwner(userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Update display name or sync profile metadata
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId);
+
+      // -----------------------------------------------------------------------
+      // Collection 2: /users/{userId}/sessions/{sessionId} — Private Drill History
+      // -----------------------------------------------------------------------
+      match /sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(sessionId);
+
+        // Secure List Query — explicitly evaluates resource.data without get()/exists()
+        allow list: if isSignedIn()
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid;
+
+        // Auth -> Static Validation -> Relational Master Gate (parent user doc exists)
+        allow create: if isVerifiedUser()
+          && isOwner(userId)
+          && isValidId(userId)
+          && isValidId(sessionId)
+          && isValidSessionRecord(incoming(), userId, sessionId)
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        // Immutable historical session log
+        allow update: if false;
+
+        allow delete: if isVerifiedUser()
+          && isOwner(userId)
+          && isValidId(userId)
+          && isValidId(sessionId);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 3: /leaderboard/{entryId} — Public Non-PII Personal Bests
+    // -------------------------------------------------------------------------
+    match /leaderboard/{entryId} {
+      allow get: if isSignedIn()
+        && isValidId(entryId)
+        && (resource == null || resource.data.isPublic == true);
+
+      // Explicit resource.data filter enforced on list (client queries where('isPublic', '==', true))
+      allow list: if isSignedIn()
+        && resource.data.isPublic == true;
+
+      allow create: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidLeaderboardEntry(incoming(), entryId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      allow update: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidLeaderboardEntry(incoming(), entryId)
+        && existing().userId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId
+        && incoming().mode == existing().mode
+        && incoming().difficulty == existing().difficulty
+        && incoming().sessionType == existing().sessionType
+        && incoming().durationSec == existing().durationSec
+        && incoming().isPublic == existing().isPublic
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Beat personal best score or tie with higher/equal accuracy
+          (
+            (incoming().score > existing().score
+              || (incoming().score == existing().score && incoming().accuracy >= existing().accuracy))
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'score', 'accuracy', 'bestStreak', 'avgResponseMs', 'qpm', 'updatedAt'
+            ])
+          )
+          ||
+          // Action: Update public display name only
+          (
+            incoming().score == existing().score
+            && incoming().accuracy == existing().accuracy
+            && incoming().bestStreak == existing().bestStreak
+            && incoming().avgResponseMs == existing().avgResponseMs
+            && incoming().qpm == existing().qpm
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(entryId)
+        && existing().userId == request.auth.uid;
+    }
+  }
+}

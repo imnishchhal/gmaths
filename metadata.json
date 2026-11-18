@@ -1,0 +1,8 @@
+{
+  "name": "Math Speedster",
+  "description": "Fast, mobile-responsive mental math sprint trainer with timed drills, streak survival, ergonomic custom numeric keypad, and Firebase Firestore personal bests and leaderboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

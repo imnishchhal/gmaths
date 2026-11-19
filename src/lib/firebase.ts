@@ -59,22 +59,36 @@ function hasValidConfig(cfg: Partial<FirebaseAppletConfig> | undefined): cfg is 
   return true;
 }
 
-export const isFirebaseConfigured = hasValidConfig(firebaseConfig);
-
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
 let googleProvider: GoogleAuthProvider | null = null;
+let firebaseReady = false;
 
-if (isFirebaseConfigured) {
-  app = initializeApp(firebaseConfig);
-  db = firebaseConfig.firestoreDatabaseId
-    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-    : getFirestore(app);
-  auth = getAuth(app);
-  googleProvider = new GoogleAuthProvider();
-  googleProvider.setCustomParameters({ prompt: 'select_account' });
+if (hasValidConfig(firebaseConfig)) {
+  try {
+    app = initializeApp(firebaseConfig);
+    db = firebaseConfig.firestoreDatabaseId
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+    firebaseReady = true;
+  } catch (err) {
+    console.warn(
+      'Firebase initialization unavailable in this browser context; falling back to localStorage.',
+      err
+    );
+    app = null;
+    db = null;
+    auth = null;
+    googleProvider = null;
+    firebaseReady = false;
+  }
 }
+
+export const isFirebaseConfigured = firebaseReady;
 
 export { app, db, auth, googleProvider, firebaseConfig };
 

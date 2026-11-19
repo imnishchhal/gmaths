@@ -98,39 +98,54 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
-  // Auth listener
+  // Auth listener with safety timeout so restricted mobile webviews never stall
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
       setAuthReady(true);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
-      setUser(nextUser);
+    const fallbackTimer = window.setTimeout(() => {
       setAuthReady(true);
+    }, 3000);
 
-      if (nextUser) {
-        setDisplayName(
-          sanitizeDisplayName(
-            nextUser.displayName ?? nextUser.email?.split('@')[0]
-          )
-        );
-        try {
-          const verifiedName = await ensureUserProfile(nextUser);
-          setDisplayName(verifiedName);
-          setCloudError(null);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          setCloudError(msg);
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (nextUser) => {
+        window.clearTimeout(fallbackTimer);
+        setUser(nextUser);
+        setAuthReady(true);
+
+        if (nextUser) {
+          setDisplayName(
+            sanitizeDisplayName(
+              nextUser.displayName ?? nextUser.email?.split('@')[0]
+            )
+          );
+          try {
+            const verifiedName = await ensureUserProfile(nextUser);
+            setDisplayName(verifiedName);
+            setCloudError(null);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setCloudError(msg);
+          }
+        } else {
+          setDisplayName('Speedster');
+          setCloudSessions([]);
+          setLeaderboard([]);
         }
-      } else {
-        setDisplayName('Speedster');
-        setCloudSessions([]);
-        setLeaderboard([]);
+      },
+      () => {
+        window.clearTimeout(fallbackTimer);
+        setAuthReady(true);
       }
-    });
+    );
 
-    return () => unsubscribe();
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
   }, []);
 
   // Attach real-time Firestore listeners ONLY once auth is ready and user is signed in

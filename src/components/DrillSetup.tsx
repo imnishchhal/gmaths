@@ -275,7 +275,7 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
                       onClick={() =>
                         onChangeConfig({ ...config, sessionType: st })
                       }
-                      className={`min-h-[44px] px-2.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap ${
+                      className={`min-h-[44px] px-1.5 sm:px-2.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap truncate ${
                         selected
                           ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'

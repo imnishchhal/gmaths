@@ -156,6 +156,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   useEffect(() => {
     const isCoarsePointer =
       typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
       window.matchMedia('(pointer: coarse)').matches;
     if (!isCoarsePointer) {
       answerInputElRef.current?.focus();
@@ -397,7 +398,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900';
 
   return (
-    <div className="h-[100dvh] w-full flex flex-col justify-between overflow-hidden bg-slate-50 dark:bg-slate-950 select-none">
+    <div className="h-screen-safe w-full flex flex-col justify-between overflow-hidden bg-slate-50 dark:bg-slate-950 select-none">
       {/* Compact Top Drill HUD (<= 56px, well within mobile sticky cap) */}
       <div className="shrink-0 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
         <div className="max-w-5xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-3">

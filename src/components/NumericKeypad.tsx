@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { CornerDownLeft, Delete, SkipForward } from 'lucide-react';
 
 interface NumericKeypadProps {
@@ -22,13 +22,26 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
   onSkip,
   disabled = false,
 }) => {
-  const trigger =
-    (handler: () => void) => (e: React.PointerEvent<HTMLButtonElement>) => {
+  const lastPointerMsRef = useRef<number>(0);
+
+  const bindKey = (handler: () => void) => ({
+    onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
+      lastPointerMsRef.current = Date.now();
       if (!disabled) {
         handler();
       }
-    };
+    },
+    onClick: () => {
+      // Fallback for mobile webviews / keyboard Enter where pointerdown didn't fire
+      if (Date.now() - lastPointerMsRef.current < 450) {
+        return;
+      }
+      if (!disabled) {
+        handler();
+      }
+    },
+  });
 
   const digitClass =
     'min-h-[54px] sm:min-h-[60px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/90 active:scale-[0.96] active:bg-slate-100 dark:active:bg-slate-800 text-slate-900 dark:text-white font-mono text-2xl font-semibold tabular-nums flex items-center justify-center select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
@@ -45,7 +58,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       {/* Row 1: 7 8 9 Backspace */}
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('7'))}
+        {...bindKey(() => onDigit('7'))}
         className={digitClass}
         aria-label="7"
       >
@@ -53,7 +66,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('8'))}
+        {...bindKey(() => onDigit('8'))}
         className={digitClass}
         aria-label="8"
       >
@@ -61,7 +74,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('9'))}
+        {...bindKey(() => onDigit('9'))}
         className={digitClass}
         aria-label="9"
       >
@@ -69,7 +82,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(onBackspace)}
+        {...bindKey(onBackspace)}
         className={utilityClass}
         aria-label="Backspace"
       >
@@ -79,7 +92,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       {/* Row 2: 4 5 6 Clear */}
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('4'))}
+        {...bindKey(() => onDigit('4'))}
         className={digitClass}
         aria-label="4"
       >
@@ -87,7 +100,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('5'))}
+        {...bindKey(() => onDigit('5'))}
         className={digitClass}
         aria-label="5"
       >
@@ -95,7 +108,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('6'))}
+        {...bindKey(() => onDigit('6'))}
         className={digitClass}
         aria-label="6"
       >
@@ -103,7 +116,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(onClear)}
+        {...bindKey(onClear)}
         className={utilityClass}
         aria-label="Clear input"
       >
@@ -113,7 +126,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       {/* Row 3: 1 2 3 + Tall Submit */}
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('1'))}
+        {...bindKey(() => onDigit('1'))}
         className={digitClass}
         aria-label="1"
       >
@@ -121,7 +134,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('2'))}
+        {...bindKey(() => onDigit('2'))}
         className={digitClass}
         aria-label="2"
       >
@@ -129,7 +142,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(() => onDigit('3'))}
+        {...bindKey(() => onDigit('3'))}
         className={digitClass}
         aria-label="3"
       >
@@ -137,7 +150,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       </button>
       <button
         type="button"
-        onPointerDown={trigger(onSubmit)}
+        {...bindKey(onSubmit)}
         className="row-span-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.97] active:bg-blue-800 text-white font-semibold flex flex-col items-center justify-center gap-1 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
         aria-label="Submit answer"
       >
@@ -152,7 +165,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
         <>
           <button
             type="button"
-            onPointerDown={trigger(onToggleSign)}
+            {...bindKey(onToggleSign)}
             className={utilityClass}
             aria-label="Toggle positive or negative sign"
           >
@@ -160,7 +173,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
           </button>
           <button
             type="button"
-            onPointerDown={trigger(() => onDigit('0'))}
+            {...bindKey(() => onDigit('0'))}
             className={digitClass}
             aria-label="0"
           >
@@ -168,7 +181,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
           </button>
           <button
             type="button"
-            onPointerDown={trigger(onSkip)}
+            {...bindKey(onSkip)}
             className={utilityClass}
             aria-label="Skip problem"
           >
@@ -180,7 +193,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
         <>
           <button
             type="button"
-            onPointerDown={trigger(() => onDigit('0'))}
+            {...bindKey(() => onDigit('0'))}
             className={`col-span-2 ${digitClass}`}
             aria-label="0"
           >
@@ -188,7 +201,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
           </button>
           <button
             type="button"
-            onPointerDown={trigger(onSkip)}
+            {...bindKey(onSkip)}
             className={utilityClass}
             aria-label="Skip problem"
           >

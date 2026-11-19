@@ -21,9 +21,25 @@ import { generateProblem } from '../utils/problemGenerator';
 import { soundEngine } from '../utils/sound';
 import { NumericKeypad } from './NumericKeypad';
 
+const KEYPAD_PREF_KEY = 'gmaths_show_onscreen_keypad_v1';
+
+function loadKeypadPreference(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const saved = window.localStorage.getItem(KEYPAD_PREF_KEY);
+    if (saved === 'true') return true;
+    if (saved === 'false') return false;
+    // Default ON for mobile/touch screens, OFF on wide desktop screens
+    return window.innerWidth < 1024;
+  } catch {
+    return true;
+  }
+}
+
 interface ActiveDrillProps {
   config: DrillConfig;
   muted: boolean;
+  activeStudentLabel?: string;
   onToggleMute: () => void;
   onComplete: (record: SessionRecord) => void;
   onExit: () => void;
@@ -38,6 +54,7 @@ interface FeedbackBanner {
 export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   config,
   muted,
+  activeStudentLabel,
   onToggleMute,
   onComplete,
   onExit,
@@ -53,9 +70,11 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   const [totalResponseMs, setTotalResponseMs] = useState<number>(0);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
   const [feedback, setFeedback] = useState<FeedbackBanner | null>(null);
-  const [showDesktopKeypad, setShowDesktopKeypad] = useState<boolean>(false);
+  const [showOnscreenKeypad, setShowOnscreenKeypad] = useState<boolean>(
+    loadKeypadPreference
+  );
 
-  // Refs prevent stale closures during rapid desktop typing or fast mobile tapping
+  // Refs avoid stale closures during rapid desktop/native typing or onscreen keypad taps
   const problemRef = useRef<MathProblem>(problem);
   const inputRef = useRef<string>('');
   const scoreRef = useRef<number>(0);
@@ -69,6 +88,22 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   const feedbackSeqRef = useRef<number>(0);
   const lastTickSecRef = useRef<number>(-1);
   const answerInputElRef = useRef<HTMLInputElement>(null);
+
+  const toggleOnscreenKeypad = useCallback(() => {
+    setShowOnscreenKeypad((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(KEYPAD_PREF_KEY, String(next));
+      } catch {
+        // Ignore storage error
+      }
+      // If user hides the webpage keypad on mobile, focus native input so phone keyboard opens immediately
+      if (!next) {
+        window.setTimeout(() => answerInputElRef.current?.focus(), 40);
+      }
+      return next;
+    });
+  }, []);
 
   const finalizeSession = useCallback(
     (forceElapsedSec?: number) => {
@@ -121,7 +156,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     [config, onComplete]
   );
 
-  // High-precision wall-clock timer (zero interval drift)
+  // High-precision wall-clock timer
   useEffect(() => {
     startTimeRef.current = performance.now();
     const timer = window.setInterval(() => {
@@ -152,16 +187,16 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     return () => window.clearInterval(timer);
   }, [config.durationSec, config.sessionType, finalizeSession]);
 
-  // Auto-focus desktop input on mount without popping mobile keyboard
+  // Auto-focus native input on desktop OR when onscreen keypad is toggled OFF
   useEffect(() => {
     const isCoarsePointer =
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(pointer: coarse)').matches;
-    if (!isCoarsePointer) {
+    if (!isCoarsePointer || !showOnscreenKeypad) {
       answerInputElRef.current?.focus();
     }
-  }, []);
+  }, [showOnscreenKeypad]);
 
   const advanceProblem = useCallback(() => {
     const next = generateProblem(
@@ -236,7 +271,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               : `Incorrect · Answer was ${current.answer}`,
         });
 
-        // In Streak Run, one mistake ends the session immediately
         if (config.sessionType === 'streak') {
           window.setTimeout(() => finalizeSession(), 240);
           return;
@@ -252,7 +286,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       if (finishedRef.current) return;
       const expectedStr = String(problemRef.current.answer);
 
-      // Instant auto-submit on exact string match
       if (config.autoSubmit && nextVal === expectedStr) {
         recordAttempt('correct', nextVal);
         return;
@@ -271,11 +304,36 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     [config.autoSubmit, recordAttempt]
   );
 
+  // Sync handler for real native device/mobile <input> keyboard typing
+  const handleNativeInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (finishedRef.current) return;
+      let raw = e.target.value;
+
+      if (config.allowNegatives) {
+        const isNeg = raw.startsWith('-');
+        const digits = raw.replace(/[^0-9]/g, '').slice(0, 6);
+        raw = isNeg ? `-${digits}` : digits;
+      } else {
+        raw = raw.replace(/[^0-9]/g, '').slice(0, 6);
+      }
+
+      // Collapse repeated leading zeros ("00" -> "0")
+      if (raw.length > 1 && raw.startsWith('0')) {
+        raw = raw.replace(/^0+/, '') || '0';
+      }
+
+      inputRef.current = raw;
+      setInputValue(raw);
+      evaluateValue(raw, false);
+    },
+    [config.allowNegatives, evaluateValue]
+  );
+
   const handleDigit = useCallback(
     (digit: string) => {
       if (finishedRef.current) return;
       const prev = inputRef.current;
-      // Avoid leading zero clutter like "00" unless negative
       if (prev === '0' && digit === '0') return;
       if (prev.replace('-', '').length >= 6) return;
 
@@ -319,10 +377,33 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     recordAttempt('skipped', inputRef.current || '—');
   }, [recordAttempt]);
 
-  // Global desktop keyboard capture (works seamlessly without clicking an input)
+  const handleInputKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleSubmit();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        handleSkip();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (attemptedRef.current > 0) {
+          finalizeSession();
+        } else {
+          onExit();
+        }
+      }
+    },
+    [finalizeSession, handleSkip, handleSubmit, onExit]
+  );
+
+  // Global desktop keyboard capture when the <input> is NOT focused (prevents double-typing!)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (finishedRef.current || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (document.activeElement === answerInputElRef.current) {
+        return;
+      }
 
       if (e.key >= '0' && e.key <= '9') {
         e.preventDefault();
@@ -395,13 +476,13 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       ? 'border-emerald-500 dark:border-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/25'
       : feedback?.kind === 'wrong' || feedback?.kind === 'skipped'
       ? 'border-red-500 dark:border-red-400 bg-red-50/40 dark:bg-red-950/25 animate-shake'
-      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900';
+      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:border-blue-600 dark:focus-within:border-blue-500';
 
   return (
-    <div className="h-screen-safe w-full flex flex-col justify-between overflow-hidden bg-slate-50 dark:bg-slate-950 select-none">
-      {/* Compact Top Drill HUD (<= 56px, well within mobile sticky cap) */}
+    <div className="h-screen-safe w-full max-w-[100vw] overflow-hidden flex flex-col justify-between bg-slate-50 dark:bg-slate-950">
+      {/* Compact Practice Header HUD (<= 56px, all buttons >= 44px touch target) */}
       <div className="shrink-0 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-5xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto px-2 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-3">
           {/* Left: Exit / Finish */}
           <button
             type="button"
@@ -412,9 +493,9 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                 onExit();
               }
             }}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-lg text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4 shrink-0" />
             <span>
               {config.sessionType === 'practice' && attempted > 0
                 ? 'Finish'
@@ -424,43 +505,64 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
 
           {/* Center: High-Contrast Tabular Timer */}
           <div
-            className={`inline-flex items-center gap-1.5 font-mono text-lg sm:text-xl font-bold tabular-nums ${
+            className={`inline-flex items-center gap-1 font-mono text-base sm:text-xl font-bold tabular-nums shrink-0 ${
               isLowTime
                 ? 'text-red-600 dark:text-red-400'
                 : 'text-slate-950 dark:text-white'
             }`}
-            aria-live="off"
           >
             <Timer className="w-4 h-4 shrink-0" />
             <span>{displayClock}</span>
           </div>
 
-          {/* Right: Live Score, Streak & Mute */}
-          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            <div className="flex items-center gap-3 font-mono text-sm sm:text-base tabular-nums">
-              <span className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm font-sans">
-                Score{' '}
-                <strong className="font-mono font-bold text-slate-950 dark:text-white text-base sm:text-lg">
+          {/* Right: Live Score, Streak, Onscreen Keypad Toggle & Mute */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            <div className="flex items-center gap-2 sm:gap-3 font-mono text-sm tabular-nums mr-0.5">
+              <span className="text-slate-500 dark:text-slate-400 text-xs font-sans">
+                <span className="hidden sm:inline">Score </span>
+                <strong className="font-mono font-bold text-slate-950 dark:text-white text-base">
                   {score}
                 </strong>
               </span>
               <span
-                className={`inline-flex items-center gap-1 font-semibold ${
+                className={`inline-flex items-center gap-0.5 font-semibold ${
                   streak >= 5
                     ? 'text-amber-600 dark:text-amber-400'
                     : 'text-slate-600 dark:text-slate-300'
                 }`}
                 title="Current Streak"
               >
-                <Flame className="w-4 h-4 shrink-0" />
+                <Flame className="w-3.5 h-3.5 shrink-0" />
                 {streak}
               </span>
             </div>
 
+            {/* Dual-Keypad Preference Toggle right in Practice Header */}
+            <button
+              type="button"
+              onClick={toggleOnscreenKeypad}
+              aria-pressed={showOnscreenKeypad}
+              title={
+                showOnscreenKeypad
+                  ? 'Hide onscreen keypad (use phone native keyboard)'
+                  : 'Show onscreen keypad'
+              }
+              className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-2.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                showOnscreenKeypad
+                  ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
+                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              <Keyboard className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">
+                {showOnscreenKeypad ? 'Keypad On' : 'Keypad Off'}
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={onToggleMute}
-              className="min-h-[40px] min-w-[40px] rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
               aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
             >
               {muted ? (
@@ -472,7 +574,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           </div>
         </div>
 
-        {/* Hairline Sprint Time Progress Bar */}
+        {/* Hairline Sprint Progress Bar */}
         {config.sessionType === 'sprint' && (
           <div className="h-1 w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
             <div
@@ -485,11 +587,12 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
         )}
       </div>
 
-      {/* Center Equation Stage */}
-      <main className="flex-1 min-h-0 flex flex-col items-center justify-center px-4 py-3 sm:py-6">
-        <div className="w-full max-w-2xl flex flex-col items-center text-center space-y-4 sm:space-y-6">
-          {/* Quiet Unboxed Preset Metadata */}
+      {/* Center Equation & Synced Native Input Stage */}
+      <main className="flex-1 min-h-0 flex flex-col items-center justify-center px-4 py-2 sm:py-5 overflow-y-auto">
+        <div className="w-full max-w-xl flex flex-col items-center text-center space-y-2.5 sm:space-y-5">
+          {/* Quiet Preset & Student Context */}
           <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+            {activeStudentLabel ? `${activeStudentLabel} · ` : ''}
             {formatSessionDescriptor(
               config.mode,
               config.difficulty,
@@ -501,41 +604,52 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           {/* Dominant Arithmetic Problem */}
           <div
             key={problem.id}
-            className="animate-pop font-mono text-5xl sm:text-7xl md:text-8xl font-bold tracking-tight text-slate-950 dark:text-white tabular-nums leading-none"
+            className="animate-pop font-mono text-4xl sm:text-7xl md:text-8xl font-bold tracking-tight text-slate-950 dark:text-white tabular-nums leading-none"
           >
             <span>{problem.operandA}</span>
-            <span className="mx-3 sm:mx-5 text-blue-600 dark:text-blue-400">
+            <span className="mx-2.5 sm:mx-5 text-blue-600 dark:text-blue-400">
               {problem.symbol}
             </span>
             <span>{problem.operandB}</span>
           </div>
 
-          {/* High-Contrast Tactile Answer Display */}
-          <div className="w-full max-w-xs sm:max-w-sm">
+          {/* Real Native Mobile/Desktop Input — Synced Seamlessly with Onscreen Keypad */}
+          <div className="w-full max-w-[260px] sm:max-w-sm">
             <div
               key={feedback?.id ?? 'idle'}
-              className={`relative h-16 sm:h-20 rounded-2xl border-2 flex items-center justify-center px-5 transition-colors duration-150 ${answerBoxTone}`}
+              className={`relative h-14 sm:h-20 rounded-2xl border-2 flex items-center justify-center px-4 transition-colors duration-150 ${answerBoxTone}`}
             >
-              {/* Hidden-native-keyboard input so screen readers and desktop focus work cleanly */}
               <input
                 ref={answerInputElRef}
                 type="text"
-                inputMode="none"
-                readOnly
+                inputMode={config.allowNegatives ? 'text' : 'numeric'}
+                pattern={config.allowNegatives ? '-?[0-9]*' : '[0-9]*'}
+                enterKeyHint="go"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 value={inputValue}
+                onChange={handleNativeInputChange}
+                onKeyDown={handleInputKeyDown}
                 aria-label={`Answer for ${problem.operandA} ${problem.symbol} ${problem.operandB}`}
-                className="w-full bg-transparent text-center font-mono text-3xl sm:text-5xl font-bold text-slate-950 dark:text-white tabular-nums focus:outline-none caret-transparent pointer-events-none"
+                className="w-full h-full bg-transparent text-center font-mono text-3xl sm:text-5xl font-bold text-slate-950 dark:text-white tabular-nums focus:outline-none placeholder:text-slate-300 dark:placeholder:text-slate-600"
                 placeholder="?"
               />
             </div>
+            <p className="mt-1.5 text-[11px] sm:text-xs text-slate-400 dark:text-slate-500">
+              {showOnscreenKeypad
+                ? 'Tap box for phone keyboard or use keypad below'
+                : 'Type with your keyboard · Toggle keypad in header'}
+            </p>
           </div>
 
-          {/* Fixed-Height Non-Blocking Feedback & Live Stats Slot */}
-          <div className="h-7 flex items-center justify-center">
+          {/* Fixed-Height Non-Blocking Feedback Slot */}
+          <div className="h-6 flex items-center justify-center">
             {feedback ? (
               <div
                 key={feedback.id}
-                className={`animate-pop inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums ${
+                className={`animate-pop inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold tabular-nums ${
                   feedback.kind === 'correct'
                     ? 'text-emerald-700 dark:text-emerald-400'
                     : 'text-red-600 dark:text-red-400'
@@ -549,76 +663,60 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                 <span>{feedback.message}</span>
               </div>
             ) : (
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 tabular-nums">
-                {config.autoSubmit
-                  ? 'Type answer — submits automatically on match'
-                  : 'Type answer and press Enter to submit'}
+              <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                Accuracy{' '}
+                <strong className="font-mono text-slate-800 dark:text-slate-200">
+                  {liveAccuracy}%
+                </strong>{' '}
+                · Avg{' '}
+                <strong className="font-mono text-slate-800 dark:text-slate-200">
+                  {liveAvgSec}s
+                </strong>{' '}
+                · Best{' '}
+                <strong className="font-mono text-slate-800 dark:text-slate-200">
+                  {bestStreak}
+                </strong>
               </p>
             )}
           </div>
 
-          {/* Unobtrusive Live Session Telemetry Strip (Unboxed, Tabular) */}
-          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400 tabular-nums">
-            <span>
-              Accuracy{' '}
-              <strong className="font-mono text-slate-800 dark:text-slate-200">
-                {liveAccuracy}%
-              </strong>
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>
-              Avg{' '}
-              <strong className="font-mono text-slate-800 dark:text-slate-200">
-                {liveAvgSec}s
-              </strong>
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>
-              Best Streak{' '}
-              <strong className="font-mono text-slate-800 dark:text-slate-200">
-                {bestStreak}
-              </strong>
-            </span>
-          </div>
-
-          {/* Desktop Quick Actions Row (Skip / End / Optional Keypad Toggle) */}
-          <div className="hidden lg:flex items-center justify-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handleSkip}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors whitespace-nowrap"
-            >
-              <SkipForward className="w-3.5 h-3.5" />
-              Skip (Tab)
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowDesktopKeypad((v) => !v)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors whitespace-nowrap"
-            >
-              <Keyboard className="w-3.5 h-3.5" />
-              {showDesktopKeypad ? 'Hide Keypad' : 'Show Keypad'}
-            </button>
-          </div>
+          {/* Quick Submit & Skip Buttons When Onscreen Keypad Is Hidden */}
+          {!showOnscreenKeypad && (
+            <div className="flex items-center justify-center gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={handleSubmit}
+                className="min-h-[44px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+              >
+                Submit
+              </button>
+              <button
+                type="button"
+                onClick={handleSkip}
+                className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 transition-colors whitespace-nowrap"
+              >
+                <SkipForward className="w-4 h-4" />
+                Skip
+              </button>
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Ergonomic Bottom Thumb-Zone Keypad (Always visible on mobile/tablet; toggleable on desktop) */}
-      <div
-        className={`shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white/80 dark:bg-slate-950/90 border-t border-slate-200/80 dark:border-slate-800/80 ${
-          showDesktopKeypad ? 'block' : 'lg:hidden'
-        }`}
-      >
-        <NumericKeypad
-          allowNegatives={config.allowNegatives}
-          onDigit={handleDigit}
-          onBackspace={handleBackspace}
-          onClear={handleClear}
-          onToggleSign={handleToggleSign}
-          onSubmit={handleSubmit}
-          onSkip={handleSkip}
-        />
-      </div>
+      {/* Webpage Onscreen Numeric Keypad (Toggleable via Practice Header) */}
+      {showOnscreenKeypad && (
+        <div className="shrink-0 px-2.5 sm:px-4 pt-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] bg-white/95 dark:bg-slate-950/95 border-t border-slate-200/80 dark:border-slate-800/80">
+          <NumericKeypad
+            allowNegatives={config.allowNegatives}
+            onDigit={handleDigit}
+            onBackspace={handleBackspace}
+            onClear={handleClear}
+            onToggleSign={handleToggleSign}
+            onSubmit={handleSubmit}
+            onSkip={handleSkip}
+          />
+        </div>
+      )}
     </div>
   );
 };

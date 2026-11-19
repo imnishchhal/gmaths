@@ -33,7 +33,6 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       }
     },
     onClick: () => {
-      // Fallback for mobile webviews / keyboard Enter where pointerdown didn't fire
       if (Date.now() - lastPointerMsRef.current < 450) {
         return;
       }
@@ -43,17 +42,18 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
     },
   });
 
+  // Compact ergonomic >= 48px touch keys so mobile screens (360x640+) never push equations off-screen
   const digitClass =
-    'min-h-[54px] sm:min-h-[60px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/90 active:scale-[0.96] active:bg-slate-100 dark:active:bg-slate-800 text-slate-900 dark:text-white font-mono text-2xl font-semibold tabular-nums flex items-center justify-center select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
+    'min-h-[48px] sm:min-h-[56px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/90 active:scale-[0.96] active:bg-slate-100 dark:active:bg-slate-800 text-slate-900 dark:text-white font-mono text-xl sm:text-2xl font-semibold tabular-nums flex items-center justify-center select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
 
   const utilityClass =
-    'min-h-[54px] sm:min-h-[60px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200/80 dark:hover:bg-slate-800 active:scale-[0.96] text-slate-700 dark:text-slate-200 font-semibold text-base flex items-center justify-center gap-1.5 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
+    'min-h-[48px] sm:min-h-[56px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200/80 dark:hover:bg-slate-800 active:scale-[0.96] text-slate-700 dark:text-slate-200 font-semibold text-sm sm:text-base flex items-center justify-center gap-1 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
 
   return (
     <div
       role="group"
-      aria-label="Numeric keypad"
-      className="w-full max-w-md mx-auto grid grid-cols-4 gap-2 sm:gap-2.5 select-none"
+      aria-label="Onscreen numeric keypad"
+      className="w-full max-w-md mx-auto grid grid-cols-4 gap-1.5 sm:gap-2.5 select-none"
     >
       {/* Row 1: 7 8 9 Backspace */}
       <button
@@ -120,7 +120,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
         className={utilityClass}
         aria-label="Clear input"
       >
-        <span className="font-mono text-lg">C</span>
+        <span className="font-mono text-base sm:text-lg">C</span>
       </button>
 
       {/* Row 3: 1 2 3 + Tall Submit */}
@@ -151,10 +151,10 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       <button
         type="button"
         {...bindKey(onSubmit)}
-        className="row-span-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.97] active:bg-blue-800 text-white font-semibold flex flex-col items-center justify-center gap-1 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
+        className="row-span-2 min-h-[48px] rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.97] active:bg-blue-800 text-white font-semibold flex flex-col items-center justify-center gap-0.5 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
         aria-label="Submit answer"
       >
-        <CornerDownLeft className="w-6 h-6" />
+        <CornerDownLeft className="w-5 h-5 sm:w-6 sm:h-6" />
         <span className="text-xs font-semibold tracking-tight whitespace-nowrap">
           Go
         </span>
@@ -169,7 +169,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
             className={utilityClass}
             aria-label="Toggle positive or negative sign"
           >
-            <span className="font-mono text-xl">±</span>
+            <span className="font-mono text-lg sm:text-xl">±</span>
           </button>
           <button
             type="button"

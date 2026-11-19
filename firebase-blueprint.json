@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Private user account metadata for Math Speedster cloud sync. Strictly isolated to the owning user to protect PII.",
+      "description": "Private user account metadata for Google-authenticated users. Strictly isolated to the owning user.",
       "type": "object",
       "properties": {
         "uid": {
@@ -36,125 +36,34 @@
           "description": "Server timestamp updated on profile modification."
         }
       },
-      "required": [
-        "uid",
-        "displayName",
-        "email",
-        "createdAt",
-        "updatedAt"
-      ]
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
     },
     "SessionRecord": {
       "title": "SessionRecord",
-      "description": "Immutable record of a completed Math Speedster drill session stored in the user's private history subcollection.",
+      "description": "Immutable record of a completed mental math drill in a user's personal subcollection.",
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique session document ID.",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "userId": {
-          "type": "string",
-          "description": "Owning Firebase Auth UID.",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "mode": {
-          "type": "string",
-          "description": "Arithmetic operation mode.",
-          "enum": [
-            "addition",
-            "subtraction",
-            "multiplication",
-            "division",
-            "mixed"
-          ]
-        },
-        "difficulty": {
-          "type": "string",
-          "description": "Difficulty tier scaling operand ranges.",
-          "enum": [
-            "easy",
-            "medium",
-            "hard"
-          ]
-        },
-        "sessionType": {
-          "type": "string",
-          "description": "Session structure (timed sprint, streak survival, or untimed practice).",
-          "enum": [
-            "sprint",
-            "streak",
-            "practice"
-          ]
-        },
-        "durationSec": {
-          "type": "integer",
-          "description": "Configured timer limit in seconds (0 for untimed modes, 30/60/90 for timed sprint)."
-        },
-        "elapsedSec": {
-          "type": "number",
-          "description": "Actual elapsed play time in seconds."
-        },
-        "score": {
-          "type": "integer",
-          "description": "Total correct answers scored in the session."
-        },
-        "attempted": {
-          "type": "integer",
-          "description": "Total questions attempted (correct + wrong + skipped)."
-        },
-        "correct": {
-          "type": "integer",
-          "description": "Total correct answers (matches score)."
-        },
-        "accuracy": {
-          "type": "number",
-          "description": "Accuracy percentage (0 to 100)."
-        },
-        "bestStreak": {
-          "type": "integer",
-          "description": "Longest consecutive correct streak during the session."
-        },
-        "avgResponseMs": {
-          "type": "integer",
-          "description": "Mean response latency per attempted question in milliseconds."
-        },
-        "qpm": {
-          "type": "number",
-          "description": "Correct answers solved per minute."
-        },
-        "allowNegatives": {
-          "type": "boolean",
-          "description": "Whether negative subtraction answers were enabled."
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Server timestamp recorded when the session was saved."
-        }
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "mode": { "type": "string", "enum": ["addition", "subtraction", "multiplication", "division", "mixed"] },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+        "sessionType": { "type": "string", "enum": ["sprint", "streak", "practice"] },
+        "durationSec": { "type": "integer" },
+        "elapsedSec": { "type": "number" },
+        "score": { "type": "integer" },
+        "attempted": { "type": "integer" },
+        "correct": { "type": "integer" },
+        "accuracy": { "type": "number" },
+        "bestStreak": { "type": "integer" },
+        "avgResponseMs": { "type": "integer" },
+        "qpm": { "type": "number" },
+        "allowNegatives": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": [
-        "id",
-        "userId",
-        "mode",
-        "difficulty",
-        "sessionType",
-        "durationSec",
-        "elapsedSec",
-        "score",
-        "attempted",
-        "correct",
-        "accuracy",
-        "bestStreak",
-        "avgResponseMs",
-        "qpm",
-        "allowNegatives",
-        "createdAt"
+        "id", "userId", "mode", "difficulty", "sessionType",
+        "durationSec", "elapsedSec", "score", "attempted", "correct",
+        "accuracy", "bestStreak", "avgResponseMs", "qpm", "allowNegatives", "createdAt"
       ]
     },
     "LeaderboardEntry": {
@@ -162,131 +71,204 @@
       "description": "Public personal-best score entry per user and configuration bucket. Contains zero PII.",
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Deterministic composite key: {userId}_{mode}_{difficulty}_{sessionType}_{durationSec}.",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "userId": {
-          "type": "string",
-          "description": "Owning Firebase Auth UID.",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "displayName": {
-          "type": "string",
-          "description": "Non-PII public display name shown on the leaderboard.",
-          "minLength": 1,
-          "maxLength": 40
-        },
-        "mode": {
-          "type": "string",
-          "description": "Arithmetic operation mode.",
-          "enum": [
-            "addition",
-            "subtraction",
-            "multiplication",
-            "division",
-            "mixed"
-          ]
-        },
-        "difficulty": {
-          "type": "string",
-          "description": "Difficulty tier.",
-          "enum": [
-            "easy",
-            "medium",
-            "hard"
-          ]
-        },
-        "sessionType": {
-          "type": "string",
-          "description": "Session structure.",
-          "enum": [
-            "sprint",
-            "streak",
-            "practice"
-          ]
-        },
-        "durationSec": {
-          "type": "integer",
-          "description": "Configured duration bucket in seconds (0, 30, 60, or 90)."
-        },
-        "score": {
-          "type": "integer",
-          "description": "Personal best score for this configuration bucket."
-        },
-        "accuracy": {
-          "type": "number",
-          "description": "Accuracy percentage for the personal best run (0 to 100)."
-        },
-        "bestStreak": {
-          "type": "integer",
-          "description": "Longest consecutive streak achieved in this best run."
-        },
-        "avgResponseMs": {
-          "type": "integer",
-          "description": "Average response time in milliseconds for this best run."
-        },
-        "qpm": {
-          "type": "number",
-          "description": "Correct answers per minute for this best run."
-        },
-        "isPublic": {
-          "type": "boolean",
-          "description": "Explicit publication marker enforced in list security rules."
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Server timestamp of initial personal best record."
-        },
-        "updatedAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Server timestamp when personal best was last beaten."
-        }
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "mode": { "type": "string", "enum": ["addition", "subtraction", "multiplication", "division", "mixed"] },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+        "sessionType": { "type": "string", "enum": ["sprint", "streak", "practice"] },
+        "durationSec": { "type": "integer" },
+        "score": { "type": "integer" },
+        "accuracy": { "type": "number" },
+        "bestStreak": { "type": "integer" },
+        "avgResponseMs": { "type": "integer" },
+        "qpm": { "type": "number" },
+        "isPublic": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
-        "id",
-        "userId",
-        "displayName",
-        "mode",
-        "difficulty",
-        "sessionType",
-        "durationSec",
-        "score",
-        "accuracy",
-        "bestStreak",
-        "avgResponseMs",
-        "qpm",
-        "isPublic",
-        "createdAt",
-        "updatedAt"
+        "id", "userId", "displayName", "mode", "difficulty", "sessionType",
+        "durationSec", "score", "accuracy", "bestStreak", "avgResponseMs",
+        "qpm", "isPublic", "createdAt", "updatedAt"
+      ]
+    },
+    "AdminAccount": {
+      "title": "AdminAccount",
+      "description": "Trusted administrator membership document.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "AgentProfile": {
+      "title": "AgentProfile",
+      "description": "Field Agent managed by Admin for onboarding parents and collecting yearly fees.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentCode": { "type": "string", "minLength": 2, "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "phone": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "email": { "type": "string", "minLength": 0, "maxLength": 120 },
+        "assignedArea": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "commissionRate": { "type": "number" },
+        "defaultYearlyFee": { "type": "number" },
+        "passcodeHash": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "workspaceId", "ownerUid", "agentCode", "name", "phone", "email",
+        "assignedArea", "commissionRate", "defaultYearlyFee", "passcodeHash",
+        "isActive", "createdAt", "updatedAt"
+      ]
+    },
+    "ParentProfile": {
+      "title": "ParentProfile",
+      "description": "Parent account onboarded by an Agent with linked Child profiles and yearly subscription.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "contact": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "passcodeHash": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "createdByAgentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "workspaceId", "ownerUid", "name", "contact", "passcodeHash",
+        "createdByAgentId", "createdAt", "updatedAt"
+      ]
+    },
+    "ChildProfile": {
+      "title": "ChildProfile",
+      "description": "Student child profile linked under a Parent account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "parentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdByAgentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "age": { "type": "integer" },
+        "grade": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "username": { "type": "string", "minLength": 2, "maxLength": 32, "pattern": "^[a-zA-Z0-9_.\\-]+$" },
+        "pinHash": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "workspaceId", "ownerUid", "parentId", "createdByAgentId",
+        "name", "age", "grade", "username", "pinHash", "createdAt", "updatedAt"
+      ]
+    },
+    "SubscriptionRecord": {
+      "title": "SubscriptionRecord",
+      "description": "Yearly subscription and fee collection ledger record for a Parent account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "parentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "planType": { "type": "string", "enum": ["yearly"] },
+        "startDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "expiryDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "feeAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "upi", "bank"] },
+        "receiptNote": { "type": "string", "minLength": 0, "maxLength": 160 },
+        "collectedByAgentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "status": { "type": "string", "enum": ["active", "expired", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "workspaceId", "ownerUid", "parentId", "planType",
+        "startDate", "expiryDate", "feeAmount", "paymentMethod",
+        "receiptNote", "collectedByAgentId", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "PracticeSession": {
+      "title": "PracticeSession",
+      "description": "Child practice session record with operation-level accuracy summary for parent tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "childId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "parentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "mode": { "type": "string", "enum": ["addition", "subtraction", "multiplication", "division", "mixed"] },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"] },
+        "sessionType": { "type": "string", "enum": ["sprint", "streak", "practice"] },
+        "durationSec": { "type": "integer" },
+        "elapsedSec": { "type": "number" },
+        "score": { "type": "integer" },
+        "attempted": { "type": "integer" },
+        "correct": { "type": "integer" },
+        "accuracy": { "type": "number" },
+        "bestStreak": { "type": "integer" },
+        "avgResponseMs": { "type": "integer" },
+        "qpm": { "type": "number" },
+        "allowNegatives": { "type": "boolean" },
+        "weakTopic": { "type": "string", "enum": ["none", "addition", "subtraction", "multiplication", "division"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "workspaceId", "ownerUid", "childId", "parentId",
+        "mode", "difficulty", "sessionType", "durationSec", "elapsedSec",
+        "score", "attempted", "correct", "accuracy", "bestStreak",
+        "avgResponseMs", "qpm", "allowNegatives", "weakTopic", "createdAt"
       ]
     }
   },
   "firestore": {
     "/users/{userId}": {
-      "schema": {
-        "$ref": "#/entities/UserProfile"
-      },
-      "description": "Private user profile holding PII (email) and displayName. Readable and writable strictly by the owning user."
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile holding PII (email) and displayName."
     },
     "/users/{userId}/sessions/{sessionId}": {
-      "schema": {
-        "$ref": "#/entities/SessionRecord"
-      },
-      "description": "Private append-only history of completed mental arithmetic drills for a user."
+      "schema": { "$ref": "#/entities/SessionRecord" },
+      "description": "Private append-only history of completed mental arithmetic drills."
     },
     "/leaderboard/{entryId}": {
-      "schema": {
-        "$ref": "#/entities/LeaderboardEntry"
-      },
-      "description": "Public personal-best scoreboard entries scoped by mode, difficulty, sessionType, and durationSec. Contains zero PII."
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public personal-best scoreboard entries containing zero PII."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminAccount" },
+      "description": "Trusted administrator membership registry."
+    },
+    "/agents/{agentId}": {
+      "schema": { "$ref": "#/entities/AgentProfile" },
+      "description": "Field Agents managed by Admin for onboarding and yearly fee collection."
+    },
+    "/parents/{parentId}": {
+      "schema": { "$ref": "#/entities/ParentProfile" },
+      "description": "Parent accounts onboarded by field Agents."
+    },
+    "/children/{childId}": {
+      "schema": { "$ref": "#/entities/ChildProfile" },
+      "description": "Student child profiles linked to Parent accounts."
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": { "$ref": "#/entities/SubscriptionRecord" },
+      "description": "Yearly subscription and fee payment ledger records."
+    },
+    "/practiceSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/PracticeSession" },
+      "description": "Per-child practice history records used by Parent progress dashboards."
     }
   }
 }

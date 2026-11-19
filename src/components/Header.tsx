@@ -1,21 +1,36 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, LogOut, User as UserIcon } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  BarChart3,
+  Briefcase,
+  Check,
+  GraduationCap,
+  History,
+  LogOut,
+  Menu,
+  Play,
+  ShieldCheck,
+  Trophy,
+  User as UserIcon,
+  Users,
+  X,
+} from 'lucide-react';
 import { useFirebase } from '../context/FirebaseContext';
+import { usePlatform } from '../context/PlatformContext';
 import { AppView } from '../types/math';
+import { PlatformRoute } from '../types/platform';
 
 interface HeaderProps {
+  route: PlatformRoute;
   activeView: AppView;
-  onSelectView: (view: AppView) => void;
+  onNavigateRoute: (route: PlatformRoute, view?: AppView) => void;
 }
 
-const NAV_ITEMS: Array<{ id: AppView; label: string }> = [
-  { id: 'play', label: 'Play' },
-  { id: 'history', label: 'History' },
-  { id: 'leaderboard', label: 'Leaderboard' },
-  { id: 'stats', label: 'Stats' },
-];
-
-export const Header: React.FC<HeaderProps> = ({ activeView, onSelectView }) => {
+export const Header: React.FC<HeaderProps> = ({
+  route,
+  activeView,
+  onNavigateRoute,
+}) => {
   const {
     user,
     displayName,
@@ -25,7 +40,9 @@ export const Header: React.FC<HeaderProps> = ({ activeView, onSelectView }) => {
     signOutUser,
     updateName,
   } = useFirebase();
+  const { roleSession, logoutRole, exitChildModeToParent } = usePlatform();
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [nameInput, setNameInput] = useState(displayName);
   const [savingName, setSavingName] = useState(false);
@@ -57,168 +74,402 @@ export const Header: React.FC<HeaderProps> = ({ activeView, onSelectView }) => {
     setTimeout(() => setSavedNotice(false), 1600);
   };
 
-  return (
-    <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
-      {/* Strict 3-Zone Top Bar Contract: Brand | Nav Links | Single Primary Action */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-8">
-        {/* Zone 1: Single-line Brand Wordmark */}
-        <button
-          type="button"
-          onClick={() => onSelectView('play')}
-          className="font-display text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded"
-        >
-          Math Speedster
-        </button>
+  const go = (nextRoute: PlatformRoute, view?: AppView) => {
+    setDrawerOpen(false);
+    setMenuOpen(false);
+    onNavigateRoute(nextRoute, view);
+  };
 
-        {/* Zone 2: 4 Clean Single-Line Nav Links (Desktop) */}
-        <nav
-          aria-label="Primary navigation"
-          className="hidden md:flex items-center gap-7"
-        >
-          {NAV_ITEMS.map((item) => {
-            const isActive = activeView === item.id;
-            return (
+  const desktopLinks: Array<{
+    key: string;
+    label: string;
+    active: boolean;
+    onClick: () => void;
+  }> = [
+    {
+      key: 'practice',
+      label: 'Practice',
+      active: route === '/' && activeView === 'play',
+      onClick: () => go('/', 'play'),
+    },
+    {
+      key: 'history',
+      label: 'Progress',
+      active:
+        route === '/' &&
+        (activeView === 'history' ||
+          activeView === 'stats' ||
+          activeView === 'leaderboard'),
+      onClick: () => go('/', 'history'),
+    },
+    {
+      key: 'parent',
+      label: 'Parent',
+      active: route === '/parent',
+      onClick: () => go('/parent'),
+    },
+    {
+      key: 'agent',
+      label: 'Agent',
+      active: route === '/agent',
+      onClick: () => go('/agent'),
+    },
+    {
+      key: 'admin',
+      label: 'Admin',
+      active: route === '/admin',
+      onClick: () => go('/admin'),
+    },
+  ];
+
+  const activeAccountLabel = roleSession
+    ? roleSession.displayName
+    : user
+    ? displayName
+    : null;
+
+  const activeRoleTag = roleSession
+    ? roleSession.role === 'admin'
+      ? 'Admin'
+      : roleSession.role === 'agent'
+      ? 'Agent'
+      : roleSession.role === 'parent'
+      ? 'Parent'
+      : 'Student'
+    : null;
+
+  return (
+    <>
+      <header className="sticky top-0 z-30 w-full max-w-[100vw] bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-3 md:gap-8">
+          {/* Left: Mobile Drawer Button + Brand Wordmark */}
+          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open navigation menu"
+              className="md:hidden min-h-[44px] min-w-[44px] -ml-1.5 rounded-lg flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => go('/', 'play')}
+              className="font-display text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded"
+            >
+              Math Speedster
+            </button>
+          </div>
+
+          {/* Center: 5 Clean Single-Line Nav Links (Desktop) */}
+          <nav
+            aria-label="Primary navigation"
+            className="hidden md:flex items-center gap-6"
+          >
+            {desktopLinks.map((item) => (
               <button
-                key={item.id}
+                key={item.key}
                 type="button"
-                onClick={() => onSelectView(item.id)}
+                onClick={item.onClick}
                 className={`relative py-4 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded ${
-                  isActive
+                  item.active
                     ? 'text-slate-950 dark:text-white'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                 }`}
               >
                 {item.label}
-                {isActive && (
+                {item.active && (
                   <span
                     aria-hidden="true"
                     className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-600 dark:bg-blue-500"
                   />
                 )}
               </button>
-            );
-          })}
-        </nav>
+            ))}
+          </nav>
 
-        {/* Zone 3: Single Primary Action */}
-        <div className="relative shrink-0" ref={menuRef}>
-          {user ? (
-            <>
+          {/* Right: Single Primary Account / Sign-in Action */}
+          <div className="relative shrink-0" ref={menuRef}>
+            {activeAccountLabel ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((o) => !o)}
+                  className="inline-flex items-center gap-2 min-h-[44px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium text-slate-900 dark:text-slate-100 transition-colors whitespace-nowrap shrink-0 max-w-[155px] sm:max-w-[200px]"
+                >
+                  <UserIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="truncate">{activeAccountLabel}</span>
+                </button>
+
+                {menuOpen && (
+                  <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg p-4 space-y-4 z-50">
+                    {roleSession && (
+                      <div className="space-y-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Active Portal · {activeRoleTag}
+                        </p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {roleSession.displayName}
+                        </p>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {roleSession.role === 'child' &&
+                            roleSession.returnToParentId && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  exitChildModeToParent();
+                                  go('/parent');
+                                }}
+                                className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold whitespace-nowrap"
+                              >
+                                <ArrowLeftRight className="w-3.5 h-3.5" />
+                                Back to Parent
+                              </button>
+                            )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              logoutRole();
+                              setMenuOpen(false);
+                            }}
+                            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                            Sign out {activeRoleTag}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {user ? (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Cloud Sync (Google)
+                          </p>
+                          <p className="text-xs font-medium text-slate-900 dark:text-white truncate">
+                            {user.email}
+                          </p>
+                        </div>
+
+                        <form onSubmit={handleSaveName} className="space-y-1.5">
+                          <label
+                            htmlFor="leaderboard-display-name"
+                            className="block text-xs font-medium text-slate-600 dark:text-slate-300"
+                          >
+                            Leaderboard Name
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              id="leaderboard-display-name"
+                              type="text"
+                              maxLength={40}
+                              value={nameInput}
+                              onChange={(e) => setNameInput(e.target.value)}
+                              className="flex-1 min-w-0 min-h-[40px] px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            />
+                            <button
+                              type="submit"
+                              disabled={savingName}
+                              className="min-h-[40px] px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold whitespace-nowrap shrink-0"
+                            >
+                              {savedNotice ? (
+                                <Check className="w-3.5 h-3.5" />
+                              ) : (
+                                'Save'
+                              )}
+                            </button>
+                          </div>
+                        </form>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void signOutUser();
+                          }}
+                          className="w-full min-h-[40px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          Disconnect Google Sync
+                        </button>
+                      </div>
+                    ) : (
+                      isConfigured && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void signInWithGoogle();
+                          }}
+                          className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-xs font-semibold whitespace-nowrap"
+                        >
+                          Connect Google Cloud Sync
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
               <button
                 type="button"
-                onClick={() => setMenuOpen((open) => !open)}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-medium text-slate-900 dark:text-slate-100 transition-colors whitespace-nowrap shrink-0 max-w-[168px]"
+                onClick={() => go('/parent')}
+                disabled={authLoading}
+                className="min-h-[44px] px-3.5 sm:px-4 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
               >
-                <UserIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span className="truncate">{displayName}</span>
+                Sign in
               </button>
-
-              {menuOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg p-4 space-y-4">
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Signed in with Google
-                    </p>
-                    <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
-                      {user.email}
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleSaveName} className="space-y-2">
-                    <label
-                      htmlFor="leaderboard-display-name"
-                      className="block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Leaderboard Name
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        id="leaderboard-display-name"
-                        type="text"
-                        maxLength={40}
-                        value={nameInput}
-                        onChange={(e) => setNameInput(e.target.value)}
-                        className="flex-1 min-w-0 px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                      <button
-                        type="submit"
-                        disabled={savingName}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
-                      >
-                        {savedNotice ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" />
-                            Saved
-                          </span>
-                        ) : (
-                          'Save'
-                        )}
-                      </button>
-                    </div>
-                  </form>
-
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        void signOutUser();
-                      }}
-                      className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      Sign out
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void signInWithGoogle()}
-              disabled={authLoading || !isConfigured}
-              className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 text-sm font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-            >
-              {authLoading
-                ? 'Signing in…'
-                : isConfigured
-                ? 'Sign in'
-                : 'Local Mode'}
-            </button>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      </header>
 
-      {/* Compact Mobile Tab Strip (stays well under 15% mobile viewport cap) */}
-      <nav
-        aria-label="Mobile navigation"
-        className="md:hidden grid grid-cols-4 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-950"
-      >
-        {NAV_ITEMS.map((item) => {
-          const isActive = activeView === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelectView(item.id)}
-              className={`h-11 text-xs font-semibold transition-colors whitespace-nowrap relative ${
-                isActive
-                  ? 'text-blue-600 dark:text-blue-400'
-                  : 'text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              {item.label}
-              {isActive && (
-                <span
-                  aria-hidden="true"
-                  className="absolute left-3 right-3 bottom-0 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-full"
-                />
-              )}
-            </button>
-          );
-        })}
-      </nav>
-    </header>
+      {/* Mobile Slide-Over Navigation Drawer */}
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 z-50 md:hidden flex"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile navigation"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <aside className="relative z-10 w-72 max-w-[85vw] h-full bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between p-4 overflow-y-auto">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+                <span className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                  Math Speedster
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Close navigation menu"
+                  className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <p className="px-3 text-xs font-semibold text-slate-400 dark:text-slate-500">
+                  Math Practice
+                </p>
+                {[
+                  {
+                    label: 'Speed Drills',
+                    icon: Play,
+                    active: route === '/' && activeView === 'play',
+                    onClick: () => go('/', 'play'),
+                  },
+                  {
+                    label: 'Run History',
+                    icon: History,
+                    active: route === '/' && activeView === 'history',
+                    onClick: () => go('/', 'history'),
+                  },
+                  {
+                    label: 'Performance Stats',
+                    icon: BarChart3,
+                    active: route === '/' && activeView === 'stats',
+                    onClick: () => go('/', 'stats'),
+                  },
+                  {
+                    label: 'Leaderboard',
+                    icon: Trophy,
+                    active: route === '/' && activeView === 'leaderboard',
+                    onClick: () => go('/', 'leaderboard'),
+                  },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-sm font-semibold transition-colors ${
+                        item.active
+                          ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-1 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <p className="px-3 text-xs font-semibold text-slate-400 dark:text-slate-500">
+                  Account Portals
+                </p>
+                {[
+                  {
+                    label: 'Student Login',
+                    icon: GraduationCap,
+                    active: route === '/child',
+                    onClick: () => go('/child'),
+                  },
+                  {
+                    label: 'Parent Portal',
+                    icon: Users,
+                    active: route === '/parent',
+                    onClick: () => go('/parent'),
+                  },
+                  {
+                    label: 'Agent Portal',
+                    icon: Briefcase,
+                    active: route === '/agent',
+                    onClick: () => go('/agent'),
+                  },
+                  {
+                    label: 'Admin Console',
+                    icon: ShieldCheck,
+                    active: route === '/admin',
+                    onClick: () => go('/admin'),
+                  },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-sm font-semibold transition-colors ${
+                        item.active
+                          ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {isConfigured && !user && (
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    void signInWithGoogle();
+                  }}
+                  className="w-full min-h-[48px] px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-sm font-semibold whitespace-nowrap"
+                >
+                  Connect Google Cloud Sync
+                </button>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
+    </>
   );
 };

@@ -103,14 +103,14 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
       {/* Category Filter Controls */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800">
+        <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 w-full sm:w-auto">
           {(['mixed', 'addition', 'subtraction', 'multiplication', 'division'] as const).map(
             (m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex-1 sm:flex-initial ${
                   mode === m
                     ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -122,13 +122,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800">
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 w-full sm:w-auto">
           {(['easy', 'medium', 'hard'] as const).map((d) => (
             <button
               key={d}
               type="button"
               onClick={() => setDifficulty(d)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+              className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex-1 sm:flex-initial ${
                 difficulty === d
                   ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -139,13 +139,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           ))}
         </div>
 
-        <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800">
+        <div className="grid grid-cols-2 sm:flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 w-full sm:w-auto">
           {BUCKETS.map((b) => (
             <button
               key={b.id}
               type="button"
               onClick={() => setBucketId(b.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+              className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                 bucketId === b.id
                   ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -159,7 +159,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
       {/* Signed-Out / Local Fallback Banner */}
       {!user ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 space-y-5">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-8 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1 max-w-xl">
               <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -192,7 +192,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
               {DIFFICULTY_META[difficulty].label} · {activeBucket.label}
             </p>
             {localBest ? (
-              <div className="flex flex-wrap items-baseline gap-6 font-mono tabular-nums">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-baseline gap-4 sm:gap-6 font-mono tabular-nums">
                 <div>
                   <span className="text-xs font-sans text-slate-500 dark:text-slate-400 block">
                     Score
@@ -249,77 +249,161 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/70 dark:bg-slate-950/40">
-                  <th className="py-3 px-4 w-16">Rank</th>
-                  <th className="py-3 px-4">Player</th>
-                  <th className="py-3 px-4 text-right">Score</th>
-                  <th className="py-3 px-4 text-right">Accuracy</th>
-                  <th className="py-3 px-4 text-right">Best Streak</th>
-                  <th className="py-3 px-4 text-right">Avg Time</th>
-                  <th className="py-3 px-4 text-right">Q/Min</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-                {rankedEntries.map((entry, index) => {
-                  const isSelf = entry.userId === user.uid;
-                  return (
-                    <tr
-                      key={entry.id}
-                      className={
-                        isSelf
-                          ? 'bg-blue-50/60 dark:bg-blue-950/25'
-                          : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
-                      }
-                    >
-                      <td className="py-3.5 px-4 font-mono font-bold tabular-nums whitespace-nowrap">
-                        <span
-                          className={
-                            index === 0
-                              ? 'text-amber-600 dark:text-amber-400'
-                              : index === 1
-                              ? 'text-slate-600 dark:text-slate-300'
-                              : index === 2
-                              ? 'text-amber-800 dark:text-amber-600'
-                              : 'text-slate-400 dark:text-slate-500'
-                          }
-                        >
-                          #{index + 1}
+        <>
+          {/* Mobile Ranking Cards */}
+          <div className="md:hidden space-y-3">
+            {rankedEntries.map((entry, index) => {
+              const isSelf = entry.userId === user.uid;
+              return (
+                <article
+                  key={entry.id}
+                  className={`rounded-2xl border p-4 space-y-3 ${
+                    isSelf
+                      ? 'border-blue-300 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/25'
+                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className={`font-mono text-sm font-bold tabular-nums shrink-0 ${
+                          index === 0
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : index === 1
+                            ? 'text-slate-600 dark:text-slate-300'
+                            : index === 2
+                            ? 'text-amber-800 dark:text-amber-600'
+                            : 'text-slate-400 dark:text-slate-500'
+                        }`}
+                      >
+                        #{index + 1}
+                      </span>
+                      <span className="font-semibold text-slate-950 dark:text-white truncate">
+                        {entry.displayName}
+                      </span>
+                      {isSelf && (
+                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 shrink-0">
+                          You
                         </span>
-                      </td>
-                      <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
-                        <span>{entry.displayName}</span>
-                        {isSelf && (
-                          <span className="ml-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-                            You
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-base font-bold text-slate-950 dark:text-white tabular-nums whitespace-nowrap">
-                        {entry.score}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
-                        {entry.accuracy.toFixed(1)}%
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
+                      )}
+                    </div>
+                    <span className="font-mono text-xl font-bold text-slate-950 dark:text-white tabular-nums shrink-0">
+                      {entry.score}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 font-mono text-xs tabular-nums">
+                    <div>
+                      <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                        Acc
+                      </span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
+                        {entry.accuracy.toFixed(0)}%
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                        Streak
+                      </span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
                         {entry.bestStreak}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                        Avg
+                      </span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
                         {(entry.avgResponseMs / 1000).toFixed(2)}s
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-600 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                        Q/Min
+                      </span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
                         {entry.qpm.toFixed(1)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        </div>
+
+          {/* Desktop Table */}
+          <div className="hidden md:block rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/70 dark:bg-slate-950/40">
+                    <th className="py-3 px-4 w-16">Rank</th>
+                    <th className="py-3 px-4">Player</th>
+                    <th className="py-3 px-4 text-right">Score</th>
+                    <th className="py-3 px-4 text-right">Accuracy</th>
+                    <th className="py-3 px-4 text-right">Best Streak</th>
+                    <th className="py-3 px-4 text-right">Avg Time</th>
+                    <th className="py-3 px-4 text-right">Q/Min</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
+                  {rankedEntries.map((entry, index) => {
+                    const isSelf = entry.userId === user.uid;
+                    return (
+                      <tr
+                        key={entry.id}
+                        className={
+                          isSelf
+                            ? 'bg-blue-50/60 dark:bg-blue-950/25'
+                            : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                        }
+                      >
+                        <td className="py-3.5 px-4 font-mono font-bold tabular-nums whitespace-nowrap">
+                          <span
+                            className={
+                              index === 0
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : index === 1
+                                ? 'text-slate-600 dark:text-slate-300'
+                                : index === 2
+                                ? 'text-amber-800 dark:text-amber-600'
+                                : 'text-slate-400 dark:text-slate-500'
+                            }
+                          >
+                            #{index + 1}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+                          <span>{entry.displayName}</span>
+                          {isSelf && (
+                            <span className="ml-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+                              You
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono text-base font-bold text-slate-950 dark:text-white tabular-nums whitespace-nowrap">
+                          {entry.score}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
+                          {entry.accuracy.toFixed(1)}%
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
+                          {entry.bestStreak}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
+                          {(entry.avgResponseMs / 1000).toFixed(2)}s
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono text-slate-600 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                          {entry.qpm.toFixed(1)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

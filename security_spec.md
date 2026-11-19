@@ -1,17 +1,19 @@
-# Math Speedster — Security Specification (Phase 0 TDD)
+# gmaths / Math Speedster — Security Specification (Phase 0 TDD)
 
 ## 1. Data Invariants
 
-1. **Identity Ownership**: Every document under `/users/{userId}` and `/users/{userId}/sessions/{sessionId}` MUST strictly belong to `request.auth.uid == userId` and `data.userId == request.auth.uid`.
-2. **Verified Accounts Only**: All write operations mandate `request.auth != null && request.auth.token.email_verified == true`.
-3. **PII Isolation**: User email addresses reside exclusively inside `/users/{userId}`, where `allow list` is unconditionally denied (`false`) and `allow get` requires `isOwner(userId)`. Public leaderboard entries (`/leaderboard/{entryId}`) strictly prohibit PII fields via `hasOnly()`.
-4. **Master Gate Relational Sync**: A `SessionRecord` in `/users/{userId}/sessions/{sessionId}` cannot be created unless its parent `/users/{userId}` document exists (`exists(...)`), and `LeaderboardEntry` creation likewise requires the owning `/users/{userId}` document to exist.
-5. **Immutable Audit History**: `SessionRecord` documents are append-only (`allow update: if false`).
-6. **Deterministic Anti-Spam Leaderboard Keys**: Every `/leaderboard/{entryId}` document ID MUST equal `{userId}_{mode}_{difficulty}_{sessionType}_{durationSec}`, restricting each user to one personal-best slot per configuration bucket.
-7. **Monotonic Leaderboard Updates & Immutable Keys**: Updates to `/leaderboard/{entryId}` MUST preserve immutable keys (`id`, `userId`, `mode`, `difficulty`, `sessionType`, `durationSec`, `isPublic`, `createdAt`), allowlist mutable keys via `affectedKeys().hasOnly(...)`, and require a non-regressing score (`incoming().score > existing().score` or equal score with higher/equal accuracy).
-8. **Temporal Integrity**: `createdAt` and `updatedAt` MUST equal `request.time` (server timestamps).
-9. **Path & Payload Volumetric Hardening**: All single-document path IDs must match `^[a-zA-Z0-9_\-]+$` (`<= 128` chars), all strings enforce explicit `.size()` bounds, and all numeric metrics enforce strict mathematical bounds (e.g., `correct <= attempted`, `bestStreak <= score`, `0 <= accuracy <= 100`).
-10. **Secure List Queries**: No blanket `allow list: if isSignedIn();`. Every `allow list` evaluates `resource.data` directly without `get()`/`exists()` lookups.
+1. **Identity & Workspace Ownership**: Every document under `/users/{userId}`, `/users/{userId}/sessions/{sessionId}`, and RBAC collections (`/agents`, `/parents`, `/children`, `/subscriptions`, `/practiceSessions`) enforces verified Google authentication (`request.auth.token.email_verified == true`) and strict `ownerUid == request.auth.uid` or bootstrapped Admin (`kumarnishchhal175@gmail.com`) isolation.
+2. **No Self-Assigned Admin Privileges**: Users cannot write `/admins/{uid}` unless already a bootstrapped Admin (`kumarnishchhal175@gmail.com` with `email_verified == true`).
+3. **PII Isolation**: User/Agent/Parent contact details are never exposed to unrelated authenticated users (`allow list` always enforces `resource.data.ownerUid == request.auth.uid` or bootstrapped Admin scoped to `workspaceId == 'gmaths_main'`). Public `/leaderboard/{entryId}` prohibits PII fields via `hasOnly()`.
+4. **Relational Integrity (Master Gate)**:
+   - Creating a `/users/{userId}/sessions/{sessionId}` requires `/users/{userId}` to exist.
+   - Creating a `/parents/{parentId}` requires its referencing `/agents/{createdByAgentId}` to exist.
+   - Creating a `/children/{childId}` requires its referencing `/parents/{parentId}` to exist.
+   - Creating a `/subscriptions/{subscriptionId}` requires both `/parents/{parentId}` and `/agents/{collectedByAgentId}` to exist.
+   - Creating a `/practiceSessions/{sessionId}` requires both `/children/{childId}` and `/parents/{parentId}` to exist.
+5. **Strict Yearly Subscription Integrity**: `planType` MUST equal `'yearly'`, `startDate`/`expiryDate` MUST match `YYYY-MM-DD`, `feeAmount` MUST be `0..1000000`, `paymentMethod` MUST be in `['cash', 'upi', 'bank']`, and `status` MUST be in `['active', 'expired', 'suspended']`.
+6. **Immutable Historical Logs**: `/users/{userId}/sessions/{sessionId}` and `/practiceSessions/{sessionId}` forbid updates (`allow update: if false`).
+7. **Temporal & Volumetric Integrity**: `createdAt == request.time`, `updatedAt == request.time`, all IDs match `^[a-zA-Z0-9_\-]+$` (`<= 128`), and every string enforces explicit `.size()` bounds.
 
 ---
 
@@ -19,15 +21,15 @@
 
 | # | Attack Vector | Target Path | Adversarial Payload / Context | Expected Outcome |
 |---|---|---|---|---|
-| 1 | **Identity Spoofing (Profile)** | `/users/victim_uid` (create as `attacker_uid`) | `{ uid: "victim_uid", displayName: "Eve", email: "eve@example.com", createdAt: SERVER_TIME, updatedAt: SERVER_TIME }` | `PERMISSION_DENIED` |
-| 2 | **Unverified Email Write** | `/users/unverified_uid` (auth with `email_verified: false`) | `{ uid: "unverified_uid", displayName: "Bot", email: "bot@example.com", createdAt: SERVER_TIME, updatedAt: SERVER_TIME }` | `PERMISSION_DENIED` |
-| 3 | **Shadow Field Injection (Ghost Field)** | `/users/alice_uid` (create as `alice_uid`) | `{ uid: "alice_uid", displayName: "Alice", email: "alice@example.com", isAdmin: true, createdAt: SERVER_TIME, updatedAt: SERVER_TIME }` | `PERMISSION_DENIED` |
-| 4 | **PII Cross-User Read** | `/users/victim_uid` (`get` as `attacker_uid`) | Authenticated non-owner attempts to read victim's email | `PERMISSION_DENIED` |
-| 5 | **Orphaned Session Write (Master Gate Bypass)** | `/users/ghost_uid/sessions/sess_1` (no `/users/ghost_uid` parent doc) | Valid `SessionRecord` payload where parent `/users/ghost_uid` does not exist | `PERMISSION_DENIED` |
-| 6 | **Session History Tampering (Update)** | `/users/alice_uid/sessions/sess_1` (`update` as `alice_uid`) | `{ score: 999 }` modifying historical session | `PERMISSION_DENIED` |
-| 7 | **Impossible Math Metrics Integrity** | `/users/alice_uid/sessions/sess_2` (create as `alice_uid`) | `{ ..., score: 50, correct: 50, attempted: 10, accuracy: 500, bestStreak: 99 }` (`correct > attempted`, `accuracy > 100`) | `PERMISSION_DENIED` |
-| 8 | **Timestamp Forgery (Temporal Integrity)** | `/users/alice_uid/sessions/sess_3` (create as `alice_uid`) | Valid fields except `createdAt: "2020-01-01T00:00:00Z"` (client-forged timestamp != `request.time`) | `PERMISSION_DENIED` |
-| 9 | **Resource Poisoning (Oversized ID / String)** | `/users/alice_uid/sessions/${"a".repeat(200)}` (create as `alice_uid`) | Document ID > 128 chars or `displayName` > 40 chars | `PERMISSION_DENIED` |
-| 10 | **Leaderboard Slot Spam (Non-Deterministic ID)** | `/leaderboard/alice_uid_custom_spam_99` (create as `alice_uid`) | `{ id: "alice_uid_custom_spam_99", userId: "alice_uid", mode: "mixed", difficulty: "medium", sessionType: "sprint", durationSec: 60, ... }` | `PERMISSION_DENIED` |
-| 11 | **Leaderboard PII Leak / Ghost Field** | `/leaderboard/alice_uid_mixed_medium_sprint_60` (create as `alice_uid`) | Valid leaderboard payload plus `email: "alice@example.com"` | `PERMISSION_DENIED` |
-| 12 | **Leaderboard Value Poisoning & Immutable Key Mutation** | `/leaderboard/alice_uid_mixed_medium_sprint_60` (`update` as `alice_uid`) | `{ score: "1000", mode: "hard", updatedAt: SERVER_TIME }` (wrong type + mutating immutable `mode`) | `PERMISSION_DENIED` |
+| 1 | **Identity Spoofing (Profile)** | `/users/victim_uid` (create as `attacker_uid`) | Spoofed `uid` != `request.auth.uid` | `PERMISSION_DENIED` |
+| 2 | **Unverified Email Write** | `/agents/agent_1` (auth with `email_verified: false`) | Even with admin email, `email_verified: false` | `PERMISSION_DENIED` |
+| 3 | **Self-Assigned Admin Escalation** | `/admins/attacker_uid` (create as non-admin) | `{ uid: "attacker_uid", email: "eve@example.com", createdAt: SERVER_TIME }` | `PERMISSION_DENIED` |
+| 4 | **Shadow Field Injection on Agent** | `/agents/agent_1` | Valid agent fields + ghost field `superUser: true` | `PERMISSION_DENIED` |
+| 5 | **Orphaned Parent Creation** | `/parents/parent_1` | References non-existent `createdByAgentId: "missing_agent"` | `PERMISSION_DENIED` |
+| 6 | **Orphaned Child Creation** | `/children/child_1` | References non-existent `parentId: "missing_parent"` | `PERMISSION_DENIED` |
+| 7 | **Invalid Subscription Plan Type** | `/subscriptions/sub_1` | `{ planType: "monthly", feeAmount: -500, ... }` | `PERMISSION_DENIED` |
+| 8 | **Immutable Subscription Owner Mutation** | `/subscriptions/sub_1` (`update`) | Attempts to change `parentId` or `ownerUid` | `PERMISSION_DENIED` |
+| 9 | **Practice Session Tampering** | `/practiceSessions/ps_1` (`update`) | Attempts to raise child `score` after completion | `PERMISSION_DENIED` |
+| 10 | **Cross-Tenant PII Read** | `/parents/parent_1` (`get` as unrelated user) | Non-owner, non-admin authenticated read | `PERMISSION_DENIED` |
+| 11 | **Oversized ID / String Poisoning** | `/agents/${'x'.repeat(160)}` | 160-char document ID or oversized `name` | `PERMISSION_DENIED` |
+| 12 | **Leaderboard Slot Spam & PII Injection** | `/leaderboard/spam_id` | Non-deterministic ID or injected `email` field | `PERMISSION_DENIED` |

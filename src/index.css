@@ -11,13 +11,20 @@
   html {
     font-family: var(--font-sans);
     -webkit-tap-highlight-color: transparent;
-    overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100%;
   }
 
   body {
-    overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100%;
     min-height: 100vh;
     min-height: 100dvh;
+  }
+
+  #root {
+    max-width: 100%;
+    overflow-x: clip;
   }
 
   h1, h2, h3, .font-display {

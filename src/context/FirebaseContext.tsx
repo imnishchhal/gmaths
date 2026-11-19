@@ -7,8 +7,10 @@ import React, {
   useState,
 } from 'react';
 import {
+  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   type User,
 } from 'firebase/auth';
@@ -34,6 +36,60 @@ import {
 import { sanitizeDisplayName } from '../lib/firestoreValidation';
 import { LeaderboardRecord, SessionRecord } from '../types/math';
 
+const REDIRECT_PENDING_KEY = 'gmaths_google_redirect_pending_v1';
+
+function extractAuthErrorCode(err: unknown): string {
+  if (err && typeof err === 'object' && 'code' in err) {
+    return String((err as { code?: unknown }).code ?? '');
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  const match = /\((auth\/[a-z0-9-]+)\)/i.exec(msg);
+  return match ? match[1] : '';
+}
+
+function formatGoogleAuthError(err: unknown): string | null {
+  const code = extractAuthErrorCode(err);
+  const host =
+    typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+
+  if (
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request'
+  ) {
+    return null;
+  }
+
+  if (code === 'auth/unauthorized-domain') {
+    return `Google Sign-In is blocked for "${host}" (auth/unauthorized-domain). Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains.`;
+  }
+
+  if (code === 'auth/network-request-failed') {
+    return 'Network error while connecting to Google Sign-In. Check your internet connection and try again.';
+  }
+
+  if (code === 'auth/web-storage-unsupported') {
+    return 'Browser storage is disabled or blocked. Enable cookies/storage or open this page directly in Chrome or Safari.';
+  }
+
+  if (code === 'auth/internal-error' || code === 'auth/operation-not-allowed') {
+    return `Google Sign-In is unavailable (${code}). Confirm Google provider is enabled in Firebase Console.`;
+  }
+
+  const rawMsg = err instanceof Error ? err.message : String(err);
+  return code
+    ? `Google Sign-In failed (${code}). Try the Redirect Sign-In option below.`
+    : rawMsg || 'Unable to complete Google Sign-In.';
+}
+
+function shouldFallbackToRedirect(err: unknown): boolean {
+  const code = extractAuthErrorCode(err);
+  return (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/operation-not-supported-in-this-environment' ||
+    code === 'auth/web-storage-unsupported'
+  );
+}
+
 interface RecordOutcome {
   savedToCloud: boolean;
   leaderboardUpdated: boolean;
@@ -50,12 +106,15 @@ interface FirebaseContextValue {
   authError: string | null;
   cloudError: string | null;
   syncingCount: number;
+  /** Increments whenever an explicit Google Sign-In (popup or redirect return) completes */
+  googleSignInSeq: number;
   sessions: SessionRecord[];
   localOnlySessions: SessionRecord[];
   leaderboard: LeaderboardRecord[];
   leaderboardLoading: boolean;
   personalBests: Record<string, SessionRecord>;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: () => Promise<User | null>;
+  signInWithGoogleRedirect: () => Promise<void>;
   signOutUser: () => Promise<void>;
   updateName: (nextName: string) => Promise<void>;
   recordCompletedSession: (session: SessionRecord) => Promise<RecordOutcome>;
@@ -78,6 +137,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
   const [authError, setAuthError] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [syncingCount, setSyncingCount] = useState<number>(0);
+  const [googleSignInSeq, setGoogleSignInSeq] = useState<number>(0);
 
   const [localSessions, setLocalSessions] = useState<SessionRecord[]>(() =>
     loadLocalSessions()
@@ -98,6 +158,42 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
+  // Process any pending Google OAuth redirect result on app load (mobile browsers & GitHub Pages)
+  useEffect(() => {
+    if (!isFirebaseConfigured || !auth) return;
+    let active = true;
+
+    void getRedirectResult(auth)
+      .then((result) => {
+        if (!active) return;
+        if (result?.user) {
+          try {
+            window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+          } catch {
+            // Ignore storage errors
+          }
+          setAuthError(null);
+          setGoogleSignInSeq((seq) => seq + 1);
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+        try {
+          window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+        } catch {
+          // Ignore storage errors
+        }
+        const formatted = formatGoogleAuthError(err);
+        if (formatted) {
+          setAuthError(formatted);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Auth listener with safety timeout so restricted mobile webviews never stall
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
@@ -107,7 +203,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const fallbackTimer = window.setTimeout(() => {
       setAuthReady(true);
-    }, 3000);
+    }, 3500);
 
     const unsubscribe = onAuthStateChanged(
       auth,
@@ -117,6 +213,17 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
         setAuthReady(true);
 
         if (nextUser) {
+          // If returning from a mobile redirect flow where Safari cleared getRedirectResult,
+          // still signal explicit Google Sign-In completion so auto-routing runs cleanly.
+          try {
+            if (window.sessionStorage.getItem(REDIRECT_PENDING_KEY) === '1') {
+              window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+              setGoogleSignInSeq((seq) => seq + 1);
+            }
+          } catch {
+            // Ignore storage errors
+          }
+
           setDisplayName(
             sanitizeDisplayName(
               nextUser.displayName ?? nextUser.email?.split('@')[0]
@@ -184,7 +291,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [authReady, user]);
 
-  // Merge cloud & local sessions (cloud wins on duplicate IDs while preserving local attempts log)
+  // Merge cloud & local speed-sprint sessions (cloud wins on duplicate IDs while preserving local attempts log)
   const sessions = useMemo(() => {
     const map = new Map<string, SessionRecord>();
     for (const local of localSessions) {
@@ -212,23 +319,73 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     [sessions]
   );
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithGoogleRedirect = useCallback(async () => {
     if (!auth || !googleProvider) {
-      setAuthError('Firebase is not configured. Playing in local mode.');
+      setAuthError('Firebase Authentication is not configured.');
       return;
     }
     setAuthLoading(true);
     setAuthError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Unable to complete sign-in.';
-      if (!message.includes('popup-closed-by-user')) {
-        setAuthError('Google sign-in could not complete. Please allow popups and try again.');
+      try {
+        window.sessionStorage.setItem(REDIRECT_PENDING_KEY, '1');
+      } catch {
+        // Ignore storage errors
       }
-    } finally {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      try {
+        window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+      } catch {
+        // Ignore storage errors
+      }
+      const formatted = formatGoogleAuthError(err);
+      if (formatted) setAuthError(formatted);
       setAuthLoading(false);
+    }
+  }, []);
+
+  const signInWithGoogle = useCallback(async (): Promise<User | null> => {
+    if (!auth || !googleProvider) {
+      setAuthError('Firebase Authentication is not configured.');
+      return null;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const credential = await signInWithPopup(auth, googleProvider);
+      setGoogleSignInSeq((seq) => seq + 1);
+      setAuthLoading(false);
+      return credential.user;
+    } catch (err) {
+      if (shouldFallbackToRedirect(err)) {
+        try {
+          try {
+            window.sessionStorage.setItem(REDIRECT_PENDING_KEY, '1');
+          } catch {
+            // Ignore storage errors
+          }
+          await signInWithRedirect(auth, googleProvider);
+          return null;
+        } catch (redirectErr) {
+          try {
+            window.sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+          } catch {
+            // Ignore storage errors
+          }
+          const formattedRedirect = formatGoogleAuthError(redirectErr);
+          if (formattedRedirect) setAuthError(formattedRedirect);
+          setAuthLoading(false);
+          return null;
+        }
+      }
+
+      const formatted = formatGoogleAuthError(err);
+      if (formatted) {
+        setAuthError(formatted);
+      }
+      setAuthLoading(false);
+      return null;
     }
   }, []);
 
@@ -260,11 +417,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const recordCompletedSession = useCallback(
     async (session: SessionRecord): Promise<RecordOutcome> => {
-      // 1. Always persist locally immediately (zero latency, works offline)
+      // 1. Keep local copy for anonymous quick-play stats
       const updatedLocal = saveLocalSession(session);
       setLocalSessions(updatedLocal);
 
-      // 2. Persist to Cloud Firestore when configured and authenticated
+      // 2. Persist directly to Cloud Firestore when authenticated
       if (!isFirebaseConfigured || !user) {
         return { savedToCloud: false, leaderboardUpdated: false };
       }
@@ -347,12 +504,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       authError,
       cloudError,
       syncingCount,
+      googleSignInSeq,
       sessions,
       localOnlySessions,
       leaderboard,
       leaderboardLoading,
       personalBests,
       signInWithGoogle,
+      signInWithGoogleRedirect,
       signOutUser,
       updateName,
       recordCompletedSession,
@@ -370,12 +529,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       authError,
       cloudError,
       syncingCount,
+      googleSignInSeq,
       sessions,
       localOnlySessions,
       leaderboard,
       leaderboardLoading,
       personalBests,
       signInWithGoogle,
+      signInWithGoogleRedirect,
       signOutUser,
       updateName,
       recordCompletedSession,

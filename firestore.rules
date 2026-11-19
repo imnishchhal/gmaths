@@ -15,12 +15,19 @@ service cloud.firestore {
     }
 
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.size() >= 3;
+    }
+
+    function userEmailLower() {
+      return request.auth.token.email.lower();
     }
 
     function isBootstrappedAdmin() {
       return isVerifiedUser()
-        && request.auth.token.email == 'kumarnishchhal175@gmail.com';
+        && userEmailLower() == 'kumarnishchhal175@gmail.com';
     }
 
     function isAdmin() {
@@ -32,10 +39,29 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isWorkspaceAuthorized(data) {
+    function isAgentRecordAuthorized(data) {
       return isVerifiedUser() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
+        || (data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
+      );
+    }
+
+    function isParentRecordAuthorized(data) {
+      return isVerifiedUser() && (
+        data.ownerUid == request.auth.uid
+        || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
+        || (data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
+        || (data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
+      );
+    }
+
+    function isFamilyScopedAuthorized(data) {
+      return isVerifiedUser() && (
+        data.ownerUid == request.auth.uid
+        || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
+        || (data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
+        || (data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail == userEmailLower())
       );
     }
 
@@ -69,6 +95,14 @@ service cloud.firestore {
 
     function isValidSessionType(sessionType) {
       return sessionType is string && sessionType in ['sprint', 'streak', 'practice'];
+    }
+
+    function isValidIndianClass(grade) {
+      return grade is string && grade in [
+        'Nursery', 'LKG', 'UKG',
+        '1st', '2nd', '3rd', '4th', '5th', '6th',
+        '7th', '8th', '9th', '10th', '11th', '12th'
+      ];
     }
 
     function isValidPaymentMethod(method) {
@@ -185,11 +219,11 @@ service cloud.firestore {
         ])
         && isValidId(data.id) && data.id == agentId
         && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
-        && isValidId(data.ownerUid) && (data.ownerUid == request.auth.uid || isBootstrappedAdmin())
+        && isValidId(data.ownerUid)
         && data.agentCode is string && data.agentCode.size() >= 2 && data.agentCode.size() <= 32 && data.agentCode.matches('^[a-zA-Z0-9_\\-]+$')
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
         && data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 40
-        && data.email is string && data.email.size() <= 120
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
         && data.assignedArea is string && data.assignedArea.size() >= 1 && data.assignedArea.size() <= 80
         && (data.commissionRate is int || data.commissionRate is float) && data.commissionRate >= 0 && data.commissionRate <= 100
         && (data.defaultYearlyFee is int || data.defaultYearlyFee is float) && data.defaultYearlyFee >= 0 && data.defaultYearlyFee <= 1000000
@@ -201,20 +235,28 @@ service cloud.firestore {
 
     function isValidParentProfile(data, parentId) {
       return data.keys().hasAll([
-          'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'passcodeHash',
-          'createdByAgentId', 'createdAt', 'updatedAt'
+          'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'email', 'passcodeHash',
+          'createdByAgentId', 'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode',
+          'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'passcodeHash',
-          'createdByAgentId', 'createdAt', 'updatedAt'
+          'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'email', 'passcodeHash',
+          'createdByAgentId', 'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode',
+          'createdAt', 'updatedAt'
         ])
         && isValidId(data.id) && data.id == parentId
         && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
-        && isValidId(data.ownerUid) && (data.ownerUid == request.auth.uid || isBootstrappedAdmin())
+        && isValidId(data.ownerUid)
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
         && data.contact is string && data.contact.size() >= 3 && data.contact.size() <= 120
+        && data.email is string && data.email.size() <= 120
         && data.passcodeHash is string && data.passcodeHash.size() >= 16 && data.passcodeHash.size() <= 128
         && isValidId(data.createdByAgentId)
+        && data.agentEmail is string && data.agentEmail.size() <= 120
+        && data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 80
+        && data.agentPhone is string && data.agentPhone.size() >= 3 && data.agentPhone.size() <= 40
+        && data.agentArea is string && data.agentArea.size() >= 1 && data.agentArea.size() <= 80
+        && data.agentCode is string && data.agentCode.size() >= 2 && data.agentCode.size() <= 32 && data.agentCode.matches('^[a-zA-Z0-9_\\-]+$')
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -222,41 +264,70 @@ service cloud.firestore {
     function isValidChildProfile(data, childId) {
       return data.keys().hasAll([
           'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
-          'name', 'age', 'grade', 'username', 'pinHash', 'createdAt', 'updatedAt'
+          'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
+          'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
           'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
-          'name', 'age', 'grade', 'username', 'pinHash', 'createdAt', 'updatedAt'
+          'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
+          'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id) && data.id == childId
         && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
-        && isValidId(data.ownerUid) && (data.ownerUid == request.auth.uid || isBootstrappedAdmin())
+        && isValidId(data.ownerUid)
         && isValidId(data.parentId)
         && isValidId(data.createdByAgentId)
+        && data.parentEmail is string && data.parentEmail.size() <= 120
+        && data.agentEmail is string && data.agentEmail.size() <= 120
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
-        && data.age is int && data.age >= 3 && data.age <= 20
-        && data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 30
-        && data.username is string && data.username.size() >= 2 && data.username.size() <= 32 && data.username.matches('^[a-zA-Z0-9_.\\-]+$')
-        && data.pinHash is string && data.pinHash.size() >= 16 && data.pinHash.size() <= 128
+        && isValidIndianClass(data.grade)
+        && data.totalScore is int && data.totalScore >= 0 && data.totalScore <= 10000000
+        && data.sessionsCount is int && data.sessionsCount >= 0 && data.sessionsCount <= 1000000
+        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 10000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChildLeaderboardEntry(data, childId) {
+      return data.keys().hasAll([
+          'id', 'childId', 'workspaceId', 'ownerUid', 'name', 'grade',
+          'totalScore', 'sessionsCount', 'bestStreak', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'childId', 'workspaceId', 'ownerUid', 'name', 'grade',
+          'totalScore', 'sessionsCount', 'bestStreak', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == childId
+        && isValidId(data.childId) && data.childId == childId
+        && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
+        && isValidId(data.ownerUid)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+        && isValidIndianClass(data.grade)
+        && data.totalScore is int && data.totalScore >= 1 && data.totalScore <= 10000000
+        && data.sessionsCount is int && data.sessionsCount >= 1 && data.sessionsCount <= 1000000
+        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 10000
+        && data.isPublic is bool && data.isPublic == true
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
 
     function isValidSubscriptionRecord(data, subscriptionId) {
       return data.keys().hasAll([
-          'id', 'workspaceId', 'ownerUid', 'parentId', 'planType',
-          'startDate', 'expiryDate', 'feeAmount', 'paymentMethod',
+          'id', 'workspaceId', 'ownerUid', 'parentId', 'parentEmail', 'agentEmail',
+          'planType', 'startDate', 'expiryDate', 'feeAmount', 'paymentMethod',
           'receiptNote', 'collectedByAgentId', 'status', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'workspaceId', 'ownerUid', 'parentId', 'planType',
-          'startDate', 'expiryDate', 'feeAmount', 'paymentMethod',
+          'id', 'workspaceId', 'ownerUid', 'parentId', 'parentEmail', 'agentEmail',
+          'planType', 'startDate', 'expiryDate', 'feeAmount', 'paymentMethod',
           'receiptNote', 'collectedByAgentId', 'status', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id) && data.id == subscriptionId
         && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
-        && isValidId(data.ownerUid) && (data.ownerUid == request.auth.uid || isBootstrappedAdmin())
+        && isValidId(data.ownerUid)
         && isValidId(data.parentId)
+        && data.parentEmail is string && data.parentEmail.size() <= 120
+        && data.agentEmail is string && data.agentEmail.size() <= 120
         && data.planType is string && data.planType == 'yearly'
         && isValidDateString(data.startDate)
         && isValidDateString(data.expiryDate)
@@ -271,22 +342,25 @@ service cloud.firestore {
 
     function isValidPracticeSession(data, sessionId) {
       return data.keys().hasAll([
-          'id', 'workspaceId', 'ownerUid', 'childId', 'parentId',
-          'mode', 'difficulty', 'sessionType', 'durationSec', 'elapsedSec',
+          'id', 'workspaceId', 'ownerUid', 'childId', 'parentId', 'parentEmail', 'agentEmail',
+          'grade', 'mode', 'difficulty', 'sessionType', 'durationSec', 'elapsedSec',
           'score', 'attempted', 'correct', 'accuracy', 'bestStreak',
           'avgResponseMs', 'qpm', 'allowNegatives', 'weakTopic', 'createdAt'
         ])
         && data.keys().hasOnly([
-          'id', 'workspaceId', 'ownerUid', 'childId', 'parentId',
-          'mode', 'difficulty', 'sessionType', 'durationSec', 'elapsedSec',
+          'id', 'workspaceId', 'ownerUid', 'childId', 'parentId', 'parentEmail', 'agentEmail',
+          'grade', 'mode', 'difficulty', 'sessionType', 'durationSec', 'elapsedSec',
           'score', 'attempted', 'correct', 'accuracy', 'bestStreak',
           'avgResponseMs', 'qpm', 'allowNegatives', 'weakTopic', 'createdAt'
         ])
         && isValidId(data.id) && data.id == sessionId
         && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
-        && isValidId(data.ownerUid) && (data.ownerUid == request.auth.uid || isBootstrappedAdmin())
+        && isValidId(data.ownerUid)
         && isValidId(data.childId)
         && isValidId(data.parentId)
+        && data.parentEmail is string && data.parentEmail.size() <= 120
+        && data.agentEmail is string && data.agentEmail.size() <= 120
+        && isValidIndianClass(data.grade)
         && isValidMode(data.mode)
         && isValidDifficulty(data.difficulty)
         && isValidSessionType(data.sessionType)
@@ -431,22 +505,22 @@ service cloud.firestore {
     match /agents/{agentId} {
       allow get: if isVerifiedUser()
         && isValidId(agentId)
-        && (resource == null || isWorkspaceAuthorized(existing()));
+        && (resource == null || isAgentRecordAuthorized(existing()));
 
       allow list: if isVerifiedUser()
-        && isWorkspaceAuthorized(resource.data);
+        && isAgentRecordAuthorized(resource.data);
 
       allow create: if isVerifiedUser()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
-        && isWorkspaceAuthorized(incoming())
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
       allow update: if isVerifiedUser()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
-        && isWorkspaceAuthorized(existing())
+        && isAgentRecordAuthorized(existing())
         && incoming().id == existing().id
         && incoming().workspaceId == existing().workspaceId
         && incoming().ownerUid == existing().ownerUid
@@ -462,7 +536,7 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(agentId)
-        && isWorkspaceAuthorized(existing());
+        && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
 
     // -------------------------------------------------------------------------
@@ -471,23 +545,27 @@ service cloud.firestore {
     match /parents/{parentId} {
       allow get: if isVerifiedUser()
         && isValidId(parentId)
-        && (resource == null || isWorkspaceAuthorized(existing()));
+        && (resource == null || isParentRecordAuthorized(existing()));
 
       allow list: if isVerifiedUser()
-        && isWorkspaceAuthorized(resource.data);
+        && isParentRecordAuthorized(resource.data);
 
       allow create: if isVerifiedUser()
         && isValidId(parentId)
         && isValidParentProfile(incoming(), parentId)
-        && isWorkspaceAuthorized(incoming())
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/agents/$(incoming().createdByAgentId));
+        && exists(/databases/$(database)/documents/agents/$(incoming().createdByAgentId))
+        && (
+          isAdmin()
+          || isAgentRecordAuthorized(get(/databases/$(database)/documents/agents/$(incoming().createdByAgentId)).data)
+        );
 
       allow update: if isVerifiedUser()
         && isValidId(parentId)
         && isValidParentProfile(incoming(), parentId)
-        && isWorkspaceAuthorized(existing())
+        && isParentRecordAuthorized(existing())
         && incoming().id == existing().id
         && incoming().workspaceId == existing().workspaceId
         && incoming().ownerUid == existing().ownerUid
@@ -497,38 +575,43 @@ service cloud.firestore {
         && (
           isAdmin()
           || incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'contact', 'passcodeHash', 'updatedAt'
+            'name', 'contact', 'email', 'passcodeHash',
+            'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt'
           ])
         );
 
       allow delete: if isVerifiedUser()
         && isValidId(parentId)
-        && isWorkspaceAuthorized(existing());
+        && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
 
     // -------------------------------------------------------------------------
-    // Collection 7: /children/{childId} — Linked Child Profiles
+    // Collection 7: /children/{childId} — Credential-Free Linked Child Profiles
     // -------------------------------------------------------------------------
     match /children/{childId} {
       allow get: if isVerifiedUser()
         && isValidId(childId)
-        && (resource == null || isWorkspaceAuthorized(existing()));
+        && (resource == null || isFamilyScopedAuthorized(existing()));
 
       allow list: if isVerifiedUser()
-        && isWorkspaceAuthorized(resource.data);
+        && isFamilyScopedAuthorized(resource.data);
 
       allow create: if isVerifiedUser()
         && isValidId(childId)
         && isValidChildProfile(incoming(), childId)
-        && isWorkspaceAuthorized(incoming())
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/parents/$(incoming().parentId));
+        && exists(/databases/$(database)/documents/parents/$(incoming().parentId))
+        && (
+          isAdmin()
+          || isParentRecordAuthorized(get(/databases/$(database)/documents/parents/$(incoming().parentId)).data)
+        );
 
       allow update: if isVerifiedUser()
         && isValidId(childId)
         && isValidChildProfile(incoming(), childId)
-        && isWorkspaceAuthorized(existing())
+        && isFamilyScopedAuthorized(existing())
         && incoming().id == existing().id
         && incoming().workspaceId == existing().workspaceId
         && incoming().ownerUid == existing().ownerUid
@@ -539,39 +622,87 @@ service cloud.firestore {
         && (
           isAdmin()
           || incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'age', 'grade', 'username', 'pinHash', 'updatedAt'
+            'name', 'grade', 'totalScore', 'sessionsCount', 'bestStreak', 'updatedAt'
           ])
         );
 
       allow delete: if isVerifiedUser()
         && isValidId(childId)
-        && isWorkspaceAuthorized(existing());
+        && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
 
     // -------------------------------------------------------------------------
-    // Collection 8: /subscriptions/{subscriptionId} — Yearly Subscription Ledger
+    // Collection 8: /childLeaderboard/{childId} — Public Non-PII Top 3 Champions
+    // -------------------------------------------------------------------------
+    match /childLeaderboard/{childId} {
+      // Zero-PII public rankings readable on Home Page (single-field index totalScore DESC)
+      allow get: if isValidId(childId)
+        && (resource == null || resource.data.isPublic == true);
+
+      allow list: if resource.data.totalScore >= 1;
+
+      allow create: if isVerifiedUser()
+        && isValidId(childId)
+        && isValidChildLeaderboardEntry(incoming(), childId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/children/$(childId))
+        && isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data);
+
+      allow update: if isVerifiedUser()
+        && isValidId(childId)
+        && isValidChildLeaderboardEntry(incoming(), childId)
+        && incoming().id == existing().id
+        && incoming().childId == existing().childId
+        && incoming().workspaceId == existing().workspaceId
+        && incoming().isPublic == existing().isPublic
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/children/$(childId))
+        && isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data)
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'grade', 'totalScore', 'sessionsCount', 'bestStreak', 'ownerUid', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(childId)
+        && (isAdmin() || existing().ownerUid == request.auth.uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 9: /subscriptions/{subscriptionId} — Yearly Subscription Ledger
     // -------------------------------------------------------------------------
     match /subscriptions/{subscriptionId} {
       allow get: if isVerifiedUser()
         && isValidId(subscriptionId)
-        && (resource == null || isWorkspaceAuthorized(existing()));
+        && (resource == null || isFamilyScopedAuthorized(existing()));
 
       allow list: if isVerifiedUser()
-        && isWorkspaceAuthorized(resource.data);
+        && isFamilyScopedAuthorized(resource.data);
 
       allow create: if isVerifiedUser()
         && isValidId(subscriptionId)
         && isValidSubscriptionRecord(incoming(), subscriptionId)
-        && isWorkspaceAuthorized(incoming())
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && exists(/databases/$(database)/documents/parents/$(incoming().parentId))
-        && exists(/databases/$(database)/documents/agents/$(incoming().collectedByAgentId));
+        && exists(/databases/$(database)/documents/agents/$(incoming().collectedByAgentId))
+        && (
+          isAdmin()
+          || (
+            isParentRecordAuthorized(get(/databases/$(database)/documents/parents/$(incoming().parentId)).data)
+            && isAgentRecordAuthorized(get(/databases/$(database)/documents/agents/$(incoming().collectedByAgentId)).data)
+          )
+        );
 
       allow update: if isVerifiedUser()
         && isValidId(subscriptionId)
         && isValidSubscriptionRecord(incoming(), subscriptionId)
-        && isWorkspaceAuthorized(existing())
+        && isFamilyScopedAuthorized(existing())
         && incoming().id == existing().id
         && incoming().workspaceId == existing().workspaceId
         && incoming().ownerUid == existing().ownerUid
@@ -589,34 +720,38 @@ service cloud.firestore {
 
       allow delete: if isVerifiedUser()
         && isValidId(subscriptionId)
-        && isWorkspaceAuthorized(existing());
+        && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
 
     // -------------------------------------------------------------------------
-    // Collection 9: /practiceSessions/{sessionId} — Child Practice Sessions
+    // Collection 10: /practiceSessions/{sessionId} — Child Practice Sessions
     // -------------------------------------------------------------------------
     match /practiceSessions/{sessionId} {
       allow get: if isVerifiedUser()
         && isValidId(sessionId)
-        && (resource == null || isWorkspaceAuthorized(existing()));
+        && (resource == null || isFamilyScopedAuthorized(existing()));
 
       allow list: if isVerifiedUser()
-        && isWorkspaceAuthorized(resource.data);
+        && isFamilyScopedAuthorized(resource.data);
 
       allow create: if isVerifiedUser()
         && isValidId(sessionId)
         && isValidPracticeSession(incoming(), sessionId)
-        && isWorkspaceAuthorized(incoming())
+        && isFamilyScopedAuthorized(incoming())
         && incoming().createdAt == request.time
         && exists(/databases/$(database)/documents/children/$(incoming().childId))
-        && exists(/databases/$(database)/documents/parents/$(incoming().parentId));
+        && exists(/databases/$(database)/documents/parents/$(incoming().parentId))
+        && (
+          isAdmin()
+          || isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(incoming().childId)).data)
+        );
 
       // Immutable historical practice log
       allow update: if false;
 
       allow delete: if isVerifiedUser()
         && isValidId(sessionId)
-        && isWorkspaceAuthorized(existing());
+        && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
   }
 }

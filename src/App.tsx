@@ -1,15 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
-  ArrowLeftRight,
+  ArrowLeft,
   BarChart3,
   Clock,
   GraduationCap,
   History,
   Lock,
-  LogOut,
   Phone,
-  Play,
   Trophy,
   X,
 } from 'lucide-react';
@@ -33,23 +31,29 @@ import {
   Difficulty,
   DrillConfig,
   GameState,
+  INDIAN_CLASS_META,
   SessionRecord,
   SessionType,
+  coerceModeForClass,
+  formatIndianClassLabel,
   getPresetKey,
+  normalizeIndianClass,
 } from './types/math';
 import {
+  ChildProfile,
   PlatformRoute,
   evaluateSubscriptionState,
   formatIsoDate,
 } from './types/platform';
 import { soundEngine } from './utils/sound';
 
-const CONFIG_STORAGE_KEY = 'math_speedster_config_v1';
+const CONFIG_STORAGE_KEY = 'math_speedster_config_v2';
 const THEME_STORAGE_KEY = 'math_speedster_theme_v1';
 
 const DEFAULT_CONFIG: DrillConfig = {
   mode: 'mixed',
-  difficulty: 'medium',
+  difficulty: 'easy',
+  indianClass: '3rd',
   sessionType: 'sprint',
   durationSec: 60,
   allowNegatives: false,
@@ -62,12 +66,19 @@ function loadInitialConfig(): DrillConfig {
     const raw = window.localStorage.getItem(CONFIG_STORAGE_KEY);
     if (!raw) return DEFAULT_CONFIG;
     const parsed = JSON.parse(raw) as Partial<DrillConfig>;
+    const indianClass = normalizeIndianClass(
+      parsed.indianClass,
+      DEFAULT_CONFIG.indianClass
+    );
+    const meta = INDIAN_CLASS_META[indianClass];
     return {
-      mode: parsed.mode ?? DEFAULT_CONFIG.mode,
-      difficulty: parsed.difficulty ?? DEFAULT_CONFIG.difficulty,
+      mode: coerceModeForClass(parsed.mode ?? DEFAULT_CONFIG.mode, indianClass),
+      difficulty: meta.mappedDifficulty,
+      indianClass,
       sessionType: parsed.sessionType ?? DEFAULT_CONFIG.sessionType,
       durationSec: parsed.durationSec ?? DEFAULT_CONFIG.durationSec,
-      allowNegatives: Boolean(parsed.allowNegatives),
+      allowNegatives:
+        meta.allowNegativesAvailable && Boolean(parsed.allowNegatives),
       autoSubmit:
         parsed.autoSubmit !== undefined
           ? Boolean(parsed.autoSubmit)
@@ -93,19 +104,13 @@ function loadInitialTheme(): boolean {
 function resolveRouteFromLocation(): PlatformRoute {
   if (typeof window === 'undefined') return '/';
   const rawHash = window.location.hash.replace(/^#/, '').replace(/\/+$/, '');
-  if (
-    rawHash === '/admin' ||
-    rawHash === '/agent' ||
-    rawHash === '/parent' ||
-    rawHash === '/child'
-  ) {
+  if (rawHash === '/admin' || rawHash === '/agent' || rawHash === '/parent') {
     return rawHash;
   }
   const pathClean = window.location.pathname.replace(/\/+$/, '');
   if (pathClean.endsWith('/admin')) return '/admin';
   if (pathClean.endsWith('/agent')) return '/agent';
   if (pathClean.endsWith('/parent')) return '/parent';
-  if (pathClean.endsWith('/child')) return '/child';
   return '/';
 }
 
@@ -120,9 +125,9 @@ const MathSpeedsterShell: React.FC = () => {
 
   const {
     roleSession,
+    autoRouteEvent,
     platformError,
     dismissPlatformError,
-    logoutRole,
     exitChildModeToParent,
     recordChildPractice,
     getAgentById,
@@ -138,6 +143,7 @@ const MathSpeedsterShell: React.FC = () => {
   const [drillRunKey, setDrillRunKey] = useState<number>(1);
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialTheme);
+  const lastHandledAutoRouteSeqRef = useRef<number>(0);
 
   const [lastSummary, setLastSummary] = useState<{
     session: SessionRecord;
@@ -190,6 +196,17 @@ const MathSpeedsterShell: React.FC = () => {
     []
   );
 
+  // Automatic routing to assigned dashboard upon Google Sign-In (popup or redirect return)
+  useEffect(() => {
+    if (
+      autoRouteEvent &&
+      autoRouteEvent.seq !== lastHandledAutoRouteSeqRef.current
+    ) {
+      lastHandledAutoRouteSeqRef.current = autoRouteEvent.seq;
+      handleNavigateRoute(autoRouteEvent.route);
+    }
+  }, [autoRouteEvent, handleNavigateRoute]);
+
   // Active child + yearly subscription check
   const activeChild =
     roleSession?.role === 'child'
@@ -238,6 +255,35 @@ const MathSpeedsterShell: React.FC = () => {
     setGameState('PLAYING');
   }, [isChildPracticeBlocked]);
 
+  // One-tap switch from Parent Dashboard: calibrate difficulty to child's Indian class & start immediately
+  const handleStartChildPractice = useCallback(
+    (child: ChildProfile) => {
+      const meta = INDIAN_CLASS_META[child.grade];
+      const calibrated: DrillConfig = {
+        ...config,
+        indianClass: child.grade,
+        difficulty: meta.mappedDifficulty,
+        mode: coerceModeForClass(config.mode, child.grade),
+        allowNegatives:
+          meta.allowNegativesAvailable && config.allowNegatives,
+      };
+      handleConfigChange(calibrated);
+      setRoute('/');
+      setActiveView('play');
+      setDrillRunKey((k) => k + 1);
+      setGameState('PLAYING');
+      if (typeof window !== 'undefined' && window.location.hash !== '#/') {
+        window.location.hash = '#/';
+      }
+    },
+    [config, handleConfigChange]
+  );
+
+  const handleBackToParentPortal = useCallback(() => {
+    exitChildModeToParent();
+    handleNavigateRoute('/parent');
+  }, [exitChildModeToParent, handleNavigateRoute]);
+
   const handleStartPreset = useCallback(
     (
       mode: ArithmeticMode,
@@ -246,10 +292,17 @@ const MathSpeedsterShell: React.FC = () => {
       durationSec: 30 | 60 | 90
     ) => {
       if (isChildPracticeBlocked) return;
+      const defaultClass =
+        difficulty === 'easy'
+          ? '3rd'
+          : difficulty === 'medium'
+          ? '5th'
+          : '10th';
       const next: DrillConfig = {
         ...config,
-        mode,
+        mode: coerceModeForClass(mode, defaultClass),
         difficulty,
+        indianClass: defaultClass,
         sessionType,
         durationSec,
       };
@@ -288,17 +341,20 @@ const MathSpeedsterShell: React.FC = () => {
       });
       setGameState('SUMMARY');
 
-      if (activeChild) {
-        void recordChildPractice(activeChild.id, record);
-      }
+      const [childSaved, outcome] = await Promise.all([
+        activeChild
+          ? recordChildPractice(activeChild.id, record)
+          : Promise.resolve(false),
+        recordCompletedSession(record),
+      ]);
 
-      const outcome = await recordCompletedSession(record);
       setLastSummary((current) =>
         current && current.session.id === record.id
           ? {
               ...current,
-              savedToCloud: outcome.savedToCloud,
-              leaderboardUpdated: outcome.leaderboardUpdated,
+              savedToCloud: outcome.savedToCloud || childSaved,
+              leaderboardUpdated:
+                outcome.leaderboardUpdated || (childSaved && record.score >= 1),
             }
           : current
       );
@@ -321,8 +377,11 @@ const MathSpeedsterShell: React.FC = () => {
         onToggleMute={handleToggleMute}
         onComplete={(rec) => void handleSessionComplete(rec)}
         onExit={() => setGameState('SETUP')}
+        onBackToParent={activeChild ? handleBackToParentPortal : undefined}
         activeStudentLabel={
-          activeChild ? `${activeChild.name} · ${activeChild.grade}` : undefined
+          activeChild
+            ? `${activeChild.name} · ${formatIndianClassLabel(activeChild.grade)}`
+            : undefined
         }
       />
     );
@@ -348,6 +407,22 @@ const MathSpeedsterShell: React.FC = () => {
       activeView === 'stats' ||
       activeView === 'leaderboard');
 
+  const renewalAgentContact = activeChildAgent
+    ? {
+        name: activeChildAgent.name,
+        code: activeChildAgent.agentCode,
+        phone: activeChildAgent.phone,
+        area: activeChildAgent.assignedArea,
+      }
+    : activeChildParent?.agentPhone
+    ? {
+        name: activeChildParent.agentName,
+        code: activeChildParent.agentCode,
+        phone: activeChildParent.agentPhone,
+        area: activeChildParent.agentArea,
+      }
+    : null;
+
   return (
     <div className="min-h-screen w-full max-w-[100vw] overflow-x-clip flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <Header
@@ -363,7 +438,8 @@ const MathSpeedsterShell: React.FC = () => {
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
               <GraduationCap className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <span className="font-semibold text-slate-900 dark:text-white truncate">
-                Student Mode: {activeChild.name} ({activeChild.grade})
+                Practicing as {activeChild.name} (
+                {formatIndianClassLabel(activeChild.grade)})
               </span>
               {activeChildSubEval?.state === 'expiring_soon' && (
                 <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
@@ -373,30 +449,14 @@ const MathSpeedsterShell: React.FC = () => {
               )}
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {roleSession?.returnToParentId ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    exitChildModeToParent();
-                    handleNavigateRoute('/parent');
-                  }}
-                  className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-slate-800 whitespace-nowrap"
-                >
-                  <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
-                  Back to Parent
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={logoutRole}
-                  className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  Sign out
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={handleBackToParentPortal}
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+              Exit / Back to Parent Portal
+            </button>
           </div>
         </div>
       )}
@@ -409,7 +469,7 @@ const MathSpeedsterShell: React.FC = () => {
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span className="break-words">
                 {noticeError.startsWith('{')
-                  ? 'Cloud sync paused due to a Firestore permission or network error. Local storage fallback remains active.'
+                  ? 'A Cloud Firestore permission or network error occurred. Verify you are signed in with the right Google account and retry.'
                   : noticeError}
               </span>
             </div>
@@ -495,52 +555,11 @@ const MathSpeedsterShell: React.FC = () => {
         {/* ROUTE: /parent */}
         {route === '/parent' &&
           (isParentAuthed ? (
-            <ParentDashboard onNavigateRoute={handleNavigateRoute} />
+            <ParentDashboard onStartChildPractice={handleStartChildPractice} />
           ) : (
             <RoleAuthGate
               key="parent"
               targetRole="parent"
-              onNavigateRoute={handleNavigateRoute}
-            />
-          ))}
-
-        {/* ROUTE: /child */}
-        {route === '/child' &&
-          (activeChild ? (
-            <div className="max-w-md mx-auto px-4 py-10">
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-5 text-center">
-                <GraduationCap className="w-9 h-9 text-blue-600 dark:text-blue-400 mx-auto" />
-                <div className="space-y-1">
-                  <h1 className="font-display text-2xl font-bold text-slate-950 dark:text-white">
-                    Signed in as {activeChild.name}
-                  </h1>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    {activeChild.grade} · @{activeChild.username}
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => handleNavigateRoute('/', 'play')}
-                    className="w-full min-h-[48px] px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold inline-flex items-center justify-center gap-2"
-                  >
-                    <Play className="w-4 h-4 fill-current" />
-                    Go to Math Practice
-                  </button>
-                  <button
-                    type="button"
-                    onClick={logoutRole}
-                    className="w-full min-h-[48px] px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    Switch Student Account
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <RoleAuthGate
-              key="child"
-              targetRole="child"
               onNavigateRoute={handleNavigateRoute}
             />
           ))}
@@ -563,47 +582,38 @@ const MathSpeedsterShell: React.FC = () => {
                     : activeChildSub
                     ? `Your family yearly plan expired on ${formatIsoDate(activeChildSub.expiryDate)}.`
                     : 'No active yearly subscription was found for this family account.'}{' '}
-                  Please ask your Parent or assigned Agent to renew for 1 year.
+                  Please ask your assigned Agent to renew for 1 year.
                 </p>
               </div>
 
-              {activeChildAgent && (
+              {renewalAgentContact && (
                 <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4 space-y-1 text-sm">
                   <p className="font-semibold text-slate-900 dark:text-white">
-                    Assigned Renewal Agent: {activeChildAgent.name} (
-                    {activeChildAgent.agentCode})
+                    Assigned Renewal Agent: {renewalAgentContact.name}
+                    {renewalAgentContact.code
+                      ? ` (${renewalAgentContact.code})`
+                      : ''}
                   </p>
                   <a
-                    href={`tel:${activeChildAgent.phone}`}
+                    href={`tel:${renewalAgentContact.phone}`}
                     className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-semibold hover:underline min-h-[40px]"
                   >
                     <Phone className="w-4 h-4 shrink-0" />
-                    {activeChildAgent.phone} · {activeChildAgent.assignedArea}
+                    {renewalAgentContact.phone}
+                    {renewalAgentContact.area
+                      ? ` · ${renewalAgentContact.area}`
+                      : ''}
                   </a>
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2.5">
-                {roleSession?.returnToParentId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      exitChildModeToParent();
-                      handleNavigateRoute('/parent');
-                    }}
-                    className="flex-1 min-h-[48px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold whitespace-nowrap"
-                  >
-                    Back to Parent Portal
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={logoutRole}
-                  className="flex-1 min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
-                >
-                  Sign out Student
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleBackToParentPortal}
+                className="w-full min-h-[48px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold whitespace-nowrap"
+              >
+                Back to Parent Portal
+              </button>
             </div>
           </div>
         )}
@@ -617,6 +627,7 @@ const MathSpeedsterShell: React.FC = () => {
               onChangeConfig={handleConfigChange}
               onStart={handleStartDrill}
               onOpenHistory={() => setActiveView('history')}
+              onOpenLeaderboard={() => setActiveView('leaderboard')}
               muted={muted}
               onToggleMute={handleToggleMute}
               darkMode={darkMode}
@@ -636,6 +647,14 @@ const MathSpeedsterShell: React.FC = () => {
               leaderboardUpdated={lastSummary.leaderboardUpdated}
               onPlayAgain={handleStartDrill}
               onBackToSetup={() => setGameState('SETUP')}
+              onBackToParent={
+                activeChild ? handleBackToParentPortal : undefined
+              }
+              activeStudentLabel={
+                activeChild
+                  ? `${activeChild.name} · ${formatIndianClassLabel(activeChild.grade)}`
+                  : undefined
+              }
             />
           )}
 

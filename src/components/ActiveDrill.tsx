@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   Check,
   Flame,
   Keyboard,
@@ -43,6 +44,8 @@ interface ActiveDrillProps {
   onToggleMute: () => void;
   onComplete: (record: SessionRecord) => void;
   onExit: () => void;
+  /** Provided when launched from Parent Portal so Parent/Child can jump straight back */
+  onBackToParent?: () => void;
 }
 
 interface FeedbackBanner {
@@ -58,9 +61,16 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   onToggleMute,
   onComplete,
   onExit,
+  onBackToParent,
 }) => {
   const [problem, setProblem] = useState<MathProblem>(() =>
-    generateProblem(config.mode, config.difficulty, config.allowNegatives)
+    generateProblem(
+      config.mode,
+      config.difficulty,
+      config.allowNegatives,
+      undefined,
+      config.indianClass
+    )
   );
   const [inputValue, setInputValue] = useState<string>('');
   const [score, setScore] = useState<number>(0);
@@ -97,7 +107,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       } catch {
         // Ignore storage error
       }
-      // If user hides the webpage keypad on mobile, focus native input so phone keyboard opens immediately
       if (!next) {
         window.setTimeout(() => answerInputElRef.current?.focus(), 40);
       }
@@ -128,13 +137,14 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           : 0;
       const qpm =
         actualElapsedSec > 0
-          ? Math.round(((finalScore / actualElapsedSec) * 60) * 10) / 10
+          ? Math.round((finalScore / actualElapsedSec) * 60 * 10) / 10
           : 0;
 
       const record: SessionRecord = {
         id: `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         mode: config.mode,
         difficulty: config.difficulty,
+        grade: config.indianClass,
         sessionType: config.sessionType,
         durationSec: config.sessionType === 'sprint' ? config.durationSec : 0,
         elapsedSec: Math.round(actualElapsedSec * 10) / 10,
@@ -203,13 +213,14 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       config.mode,
       config.difficulty,
       config.allowNegatives,
-      problemRef.current.signature
+      problemRef.current.signature,
+      config.indianClass
     );
     problemRef.current = next;
     inputRef.current = '';
     setProblem(next);
     setInputValue('');
-  }, [config.allowNegatives, config.difficulty, config.mode]);
+  }, [config.allowNegatives, config.difficulty, config.indianClass, config.mode]);
 
   const recordAttempt = useCallback(
     (outcome: 'correct' | 'wrong' | 'skipped', submittedText: string) => {
@@ -304,7 +315,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     [config.autoSubmit, recordAttempt]
   );
 
-  // Sync handler for real native device/mobile <input> keyboard typing
   const handleNativeInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       if (finishedRef.current) return;
@@ -318,7 +328,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
         raw = raw.replace(/[^0-9]/g, '').slice(0, 6);
       }
 
-      // Collapse repeated leading zeros ("00" -> "0")
       if (raw.length > 1 && raw.startsWith('0')) {
         raw = raw.replace(/^0+/, '') || '0';
       }
@@ -397,7 +406,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     [finalizeSession, handleSkip, handleSubmit, onExit]
   );
 
-  // Global desktop keyboard capture when the <input> is NOT focused (prevents double-typing!)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (finishedRef.current || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -480,28 +488,52 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
 
   return (
     <div className="h-screen-safe w-full max-w-[100vw] overflow-hidden flex flex-col justify-between bg-slate-50 dark:bg-slate-950">
-      {/* Compact Practice Header HUD (<= 56px, all buttons >= 44px touch target) */}
+      {/* Compact Practice Header HUD */}
       <div className="shrink-0 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
         <div className="max-w-5xl mx-auto px-2 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-3">
-          {/* Left: Exit / Finish */}
-          <button
-            type="button"
-            onClick={() => {
-              if (config.sessionType === 'practice' && attempted > 0) {
-                finalizeSession();
-              } else {
-                onExit();
-              }
-            }}
-            className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-lg text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
-          >
-            <X className="w-4 h-4 shrink-0" />
-            <span>
-              {config.sessionType === 'practice' && attempted > 0
-                ? 'Finish'
-                : 'Exit'}
-            </span>
-          </button>
+          {/* Left: Back to Parent Portal (if in Child Mode) or Exit / Finish */}
+          <div className="flex items-center gap-1 shrink-0">
+            {onBackToParent ? (
+              <button
+                type="button"
+                onClick={onBackToParent}
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] px-2.5 sm:px-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 text-xs sm:text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 transition-colors whitespace-nowrap shrink-0"
+              >
+                <ArrowLeft className="w-4 h-4 shrink-0" />
+                <span className="hidden xs:inline sm:inline">Parent Portal</span>
+                <span className="xs:hidden sm:hidden">Parent</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (config.sessionType === 'practice' && attempted > 0) {
+                    finalizeSession();
+                  } else {
+                    onExit();
+                  }
+                }}
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-lg text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+              >
+                <X className="w-4 h-4 shrink-0" />
+                <span>
+                  {config.sessionType === 'practice' && attempted > 0
+                    ? 'Finish'
+                    : 'Exit'}
+                </span>
+              </button>
+            )}
+
+            {onBackToParent && config.sessionType === 'practice' && attempted > 0 && (
+              <button
+                type="button"
+                onClick={() => finalizeSession()}
+                className="inline-flex items-center justify-center min-h-[44px] px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap shrink-0"
+              >
+                Finish
+              </button>
+            )}
+          </div>
 
           {/* Center: High-Contrast Tabular Timer */}
           <div
@@ -537,7 +569,6 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               </span>
             </div>
 
-            {/* Dual-Keypad Preference Toggle right in Practice Header */}
             <button
               type="button"
               onClick={toggleOnscreenKeypad}
@@ -597,7 +628,8 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               config.mode,
               config.difficulty,
               config.sessionType,
-              config.durationSec
+              config.durationSec,
+              config.indianClass
             )}
           </p>
 

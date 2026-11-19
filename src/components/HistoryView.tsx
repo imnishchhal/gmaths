@@ -219,7 +219,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         run.mode,
                         run.difficulty,
                         run.sessionType,
-                        run.durationSec
+                        run.durationSec,
+                        run.grade
                       )}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums mt-0.5">
@@ -314,7 +315,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           run.mode,
                           run.difficulty,
                           run.sessionType,
-                          run.durationSec
+                          run.durationSec,
+                          run.grade
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-950 dark:text-white tabular-nums whitespace-nowrap">

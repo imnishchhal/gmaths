@@ -2,6 +2,7 @@ import {
   ArithmeticMode,
   ConcreteOperation,
   Difficulty,
+  IndianClass,
   SessionType,
 } from './math';
 
@@ -17,7 +18,8 @@ export type ComputedSubscriptionState =
   | 'expired'
   | 'suspended';
 
-export type PlatformRoute = '/' | '/admin' | '/agent' | '/parent' | '/child';
+/** Credential-free child switching happens directly from /parent — no separate /child login route */
+export type PlatformRoute = '/' | '/admin' | '/agent' | '/parent';
 
 export interface AgentProfile {
   id: string;
@@ -26,6 +28,7 @@ export interface AgentProfile {
   agentCode: string;
   name: string;
   phone: string;
+  /** Required lowercase Google Sign-In email for cross-device Firestore access */
   email: string;
   assignedArea: string;
   commissionRate: number;
@@ -42,23 +45,50 @@ export interface ParentProfile {
   ownerUid: string;
   name: string;
   contact: string;
+  /** Lowercase Google Sign-In email for cross-device Parent access */
+  email: string;
   passcodeHash: string;
   createdByAgentId: string;
+  /** Denormalized agent metadata so Parents see renewal contact directly without cross-collection reads */
+  agentEmail: string;
+  agentName: string;
+  agentPhone: string;
+  agentArea: string;
+  agentCode: string;
   createdAtMs: number;
   updatedAtMs: number;
 }
 
+/** Credential-free student profile (no username, password, or PIN) */
 export interface ChildProfile {
   id: string;
   workspaceId: string;
   ownerUid: string;
   parentId: string;
   createdByAgentId: string;
+  parentEmail: string;
+  agentEmail: string;
   name: string;
-  age: number;
-  grade: string;
-  username: string;
-  pinHash: string;
+  grade: IndianClass;
+  totalScore: number;
+  sessionsCount: number;
+  bestStreak: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+/** Public zero-PII child ranking record backing Home Page Top 3 Math Champions */
+export interface ChildLeaderboardEntry {
+  id: string;
+  childId: string;
+  workspaceId: string;
+  ownerUid: string;
+  name: string;
+  grade: IndianClass;
+  totalScore: number;
+  sessionsCount: number;
+  bestStreak: number;
+  isPublic: true;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -68,6 +98,8 @@ export interface SubscriptionRecord {
   workspaceId: string;
   ownerUid: string;
   parentId: string;
+  parentEmail: string;
+  agentEmail: string;
   planType: 'yearly';
   /** ISO calendar date YYYY-MM-DD */
   startDate: string;
@@ -90,6 +122,9 @@ export interface PracticeSession {
   ownerUid: string;
   childId: string;
   parentId: string;
+  parentEmail: string;
+  agentEmail: string;
+  grade: IndianClass;
   mode: ArithmeticMode;
   difficulty: Difficulty;
   sessionType: SessionType;
@@ -111,21 +146,18 @@ export interface RoleSession {
   role: UserRole;
   accountId: string;
   displayName: string;
-  /** Set when a Parent uses "Switch to Child Mode" so they can jump straight back */
+  /** Set when a Parent launches a child via one-tap switching */
   returnToParentId?: string;
 }
 
+/** Simplified child onboarding: ONLY Name and Indian Class/Grade */
 export interface ChildOnboardingInput {
   name: string;
-  age: number;
-  grade: string;
-  username: string;
-  pin: string;
+  grade: IndianClass;
 }
 
 export const WORKSPACE_ID = 'gmaths_main';
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'kumarnishchhal175@gmail.com';
-export const LOCAL_ADMIN_DEFAULT_EMAIL = 'admin@gmaths.app';
 
 export function todayIsoDate(): string {
   const now = new Date();

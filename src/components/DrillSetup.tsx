@@ -2,7 +2,9 @@ import React, { useEffect } from 'react';
 import {
   ArrowRight,
   Cloud,
+  GraduationCap,
   HardDrive,
+  Lock,
   Moon,
   Play,
   Sun,
@@ -13,22 +15,28 @@ import {
 import { useFirebase } from '../context/FirebaseContext';
 import {
   ArithmeticMode,
-  DIFFICULTY_META,
-  Difficulty,
   DrillConfig,
+  INDIAN_CLASSES,
+  INDIAN_CLASS_META,
+  IndianClass,
   MODE_META,
   SESSION_TYPE_META,
   SessionType,
   SprintDuration,
+  coerceModeForClass,
+  formatIndianClassLabel,
   formatSessionDescriptor,
+  getAllowedModesForClass,
   getPresetKey,
 } from '../types/math';
+import { TopChampionsCard } from './TopChampionsCard';
 
 interface DrillSetupProps {
   config: DrillConfig;
   onChangeConfig: (next: DrillConfig) => void;
   onStart: () => void;
   onOpenHistory: () => void;
+  onOpenLeaderboard: () => void;
   muted: boolean;
   onToggleMute: () => void;
   darkMode: boolean;
@@ -43,8 +51,6 @@ const MODES: ArithmeticMode[] = [
   'division',
 ];
 
-const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
-
 const SESSION_TYPES: SessionType[] = ['sprint', 'streak', 'practice'];
 
 const DURATIONS: SprintDuration[] = [30, 60, 90];
@@ -54,6 +60,7 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
   onChangeConfig,
   onStart,
   onOpenHistory,
+  onOpenLeaderboard,
   muted,
   onToggleMute,
   darkMode,
@@ -61,6 +68,9 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
 }) => {
   const { user, isConfigured, sessions, personalBests, signInWithGoogle } =
     useFirebase();
+
+  const classMeta = INDIAN_CLASS_META[config.indianClass];
+  const allowedModes = getAllowedModesForClass(config.indianClass);
 
   const activePresetKey = getPresetKey(
     config.mode,
@@ -71,13 +81,14 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
   const presetBest = personalBests[activePresetKey];
   const recentRuns = sessions.slice(0, 4);
 
-  // Allow pressing Space or Enter directly on the setup screen to start immediately
+  // Allow pressing Enter directly on the setup screen to start immediately
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (
         target &&
         (target.tagName === 'INPUT' ||
+          target.tagName === 'SELECT' ||
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'BUTTON' ||
           target.isContentEditable)
@@ -100,15 +111,24 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
       ? 'Start Streak Run'
       : 'Start Practice';
 
-  const handleDifficultyChange = (nextDifficulty: Difficulty) => {
-    const recommended = DIFFICULTY_META[nextDifficulty].recommendedDuration;
+  const handleClassChange = (nextClass: IndianClass) => {
+    const meta = INDIAN_CLASS_META[nextClass];
+    const nextMode = coerceModeForClass(config.mode, nextClass);
+    const prevRecommended =
+      INDIAN_CLASS_META[config.indianClass].recommendedDuration;
+
     onChangeConfig({
       ...config,
-      difficulty: nextDifficulty,
+      indianClass: nextClass,
+      difficulty: meta.mappedDifficulty,
+      mode: nextMode,
+      allowNegatives: meta.allowNegativesAvailable
+        ? config.allowNegatives
+        : false,
       durationSec:
         config.sessionType === 'sprint' &&
-        config.durationSec === DIFFICULTY_META[config.difficulty].recommendedDuration
-          ? recommended
+        config.durationSec === prevRecommended
+          ? meta.recommendedDuration
           : config.durationSec,
     });
   };
@@ -122,12 +142,13 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
             Mental arithmetic at sprint speed
           </h1>
           <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
-            Configure your drill and jump straight in. Desktop keyboards and the
-            mobile keypad both submit with zero lag.
+            Pick your school class from Nursery to 12th and jump straight in.
+            Phone keyboards, onscreen keypads, and desktop keys all submit with
+            zero lag.
           </p>
         </div>
 
-        {/* Utility Toolbar Controls (placed below header per Top Bar Contract) */}
+        {/* Utility Toolbar Controls */}
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
@@ -170,77 +191,99 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
       </div>
 
       {/* Balanced 2-Column Desktop Layout / Single-Column Mobile */}
-      <div className="mt-6 sm:mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="mt-6 sm:mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
         {/* Left Dominant Column: Drill Configuration & Primary Launch CTA */}
         <section className="lg:col-span-7 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-7 space-y-6">
-          {/* Operation Selector */}
+          {/* Indian School Class / Grade Selector */}
           <div className="space-y-2.5">
-            <label className="block text-sm font-semibold text-slate-900 dark:text-white">
-              Arithmetic Mode
-            </label>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <label
+                htmlFor="indian-class-select"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"
+              >
+                <GraduationCap className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                Class / Grade (Indian Curriculum)
+              </label>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                {classMeta.stage}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+              <select
+                id="indian-class-select"
+                value={config.indianClass}
+                onChange={(e) =>
+                  handleClassChange(e.target.value as IndianClass)
+                }
+                className="sm:col-span-5 w-full min-h-[48px] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold text-slate-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              >
+                {INDIAN_CLASSES.map((cls) => (
+                  <option key={cls} value={cls}>
+                    {formatIndianClassLabel(cls)} ({INDIAN_CLASS_META[cls].stage})
+                  </option>
+                ))}
+              </select>
+
+              <div className="sm:col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 px-3.5 py-2.5 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  {classMeta.fullLabel} Level:{' '}
+                </span>
+                {classMeta.rangeSummary}
+              </div>
+            </div>
+          </div>
+
+          {/* Operation Selector (gated by selected Indian Class) */}
+          <div className="space-y-2.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <label className="block text-sm font-semibold text-slate-900 dark:text-white">
+                Arithmetic Mode
+              </label>
+              {allowedModes.length < MODES.length && (
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Matched to {classMeta.fullLabel} topics
+                </span>
+              )}
+            </div>
             <div
               role="radiogroup"
               aria-label="Arithmetic Mode"
               className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800"
             >
               {MODES.map((mode) => {
+                const isAllowed = allowedModes.includes(mode);
                 const selected = config.mode === mode;
                 return (
                   <button
                     key={mode}
                     type="button"
                     role="radio"
+                    disabled={!isAllowed}
                     aria-checked={selected}
-                    onClick={() => onChangeConfig({ ...config, mode })}
+                    title={
+                      isAllowed
+                        ? MODE_META[mode].label
+                        : `${MODE_META[mode].label} unlocks in higher classes`
+                    }
+                    onClick={() =>
+                      isAllowed && onChangeConfig({ ...config, mode })
+                    }
                     className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap flex items-center justify-center gap-1.5 ${
-                      selected
+                      !isAllowed
+                        ? 'opacity-40 cursor-not-allowed text-slate-400 dark:text-slate-600'
+                        : selected
                         ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                     }`}
                   >
+                    {!isAllowed && <Lock className="w-3 h-3 shrink-0" />}
                     <span>{MODE_META[mode].shortLabel}</span>
                     {mode !== 'mixed' && (
                       <span className="font-mono text-xs opacity-75">
                         {MODE_META[mode].symbol}
                       </span>
                     )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Difficulty Selector */}
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <label className="text-sm font-semibold text-slate-900 dark:text-white">
-                Difficulty
-              </label>
-              <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                {DIFFICULTY_META[config.difficulty].rangeSummary}
-              </span>
-            </div>
-            <div
-              role="radiogroup"
-              aria-label="Difficulty"
-              className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800"
-            >
-              {DIFFICULTIES.map((diff) => {
-                const selected = config.difficulty === diff;
-                return (
-                  <button
-                    key={diff}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => handleDifficultyChange(diff)}
-                    className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap ${
-                      selected
-                        ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
-                    }`}
-                  >
-                    {DIFFICULTY_META[diff].label}
                   </button>
                 );
               })}
@@ -359,34 +402,48 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
               </button>
             </label>
 
-            <label className="flex items-center justify-between gap-3 py-2 cursor-pointer select-none">
+            <label
+              className={`flex items-center justify-between gap-3 py-2 select-none ${
+                classMeta.allowNegativesAvailable
+                  ? 'cursor-pointer'
+                  : 'opacity-55 cursor-not-allowed'
+              }`}
+            >
               <div>
                 <span className="block text-sm font-medium text-slate-900 dark:text-white">
                   Allow negatives (±)
                 </span>
                 <span className="block text-xs text-slate-500 dark:text-slate-400">
-                  Include negative subtraction answers
+                  {classMeta.allowNegativesAvailable
+                    ? 'Include negative subtraction answers'
+                    : 'Unlocked from Class 6th onwards'}
                 </span>
               </div>
               <button
                 type="button"
                 role="switch"
-                aria-checked={config.allowNegatives}
+                disabled={!classMeta.allowNegativesAvailable}
+                aria-checked={
+                  classMeta.allowNegativesAvailable && config.allowNegatives
+                }
                 onClick={() =>
+                  classMeta.allowNegativesAvailable &&
                   onChangeConfig({
                     ...config,
                     allowNegatives: !config.allowNegatives,
                   })
                 }
                 className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
-                  config.allowNegatives
+                  classMeta.allowNegativesAvailable && config.allowNegatives
                     ? 'bg-blue-600'
                     : 'bg-slate-300 dark:bg-slate-700'
                 }`}
               >
                 <span
                   className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
-                    config.allowNegatives ? 'translate-x-5.5' : 'translate-x-0.5'
+                    classMeta.allowNegativesAvailable && config.allowNegatives
+                      ? 'translate-x-5.5'
+                      : 'translate-x-0.5'
                   }`}
                 />
               </button>
@@ -404,13 +461,20 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
               {startLabel}
             </button>
             <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-              Press <kbd className="font-mono font-semibold text-slate-700 dark:text-slate-300">Enter</kbd> to launch · Exact integer problems only
+              Press{' '}
+              <kbd className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                Enter
+              </kbd>{' '}
+              to launch · Exact integer problems only
             </p>
           </div>
         </section>
 
-        {/* Right Column: Personal Best Benchmark & Recent Runs */}
+        {/* Right Column: Live Top 3 Math Champions, Personal Best & Recent Runs */}
         <aside className="lg:col-span-5 space-y-6">
+          {/* Home Page Top 3 Math Champions */}
+          <TopChampionsCard onOpenLeaderboard={onOpenLeaderboard} />
+
           {/* Selected Preset Personal Best */}
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 space-y-4">
             <div className="flex items-start justify-between gap-3">
@@ -423,7 +487,8 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
                     config.mode,
                     config.difficulty,
                     config.sessionType,
-                    config.durationSec
+                    config.durationSec,
+                    config.indianClass
                   )}
                 </p>
               </div>
@@ -467,8 +532,8 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
               </div>
             ) : (
               <p className="text-sm text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-                No benchmark recorded for this preset yet. Complete your first run
-                to set a target.
+                No benchmark recorded for this preset yet. Complete your first
+                run to set a target.
               </p>
             )}
           </div>
@@ -493,8 +558,8 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
 
             {recentRuns.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Completed drills appear here immediately with score, accuracy, and
-                response speed.
+                Completed drills appear here immediately with score, accuracy,
+                and response speed.
               </p>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -509,7 +574,8 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
                           run.mode,
                           run.difficulty,
                           run.sessionType,
-                          run.durationSec
+                          run.durationSec,
+                          run.grade
                         )}
                       </p>
                       <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
@@ -533,13 +599,13 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
               {user && isConfigured ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Cloud className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  Synced with Cloud Firestore
+                  Synced live with Cloud Firestore
                 </span>
               ) : (
                 <>
                   <span className="inline-flex items-center gap-1.5">
                     <HardDrive className="w-3.5 h-3.5 shrink-0" />
-                    Saving to browser storage
+                    Quick-play guest mode
                   </span>
                   {isConfigured && (
                     <button
@@ -547,7 +613,7 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
                       onClick={() => void signInWithGoogle()}
                       className="font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap shrink-0"
                     >
-                      Sync to cloud
+                      Sign in with Google
                     </button>
                   )}
                 </>

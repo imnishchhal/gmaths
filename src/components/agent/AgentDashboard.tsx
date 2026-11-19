@@ -16,6 +16,11 @@ import {
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
 import {
+  INDIAN_CLASSES,
+  IndianClass,
+  formatIndianClassLabel,
+} from '../../types/math';
+import {
   ChildOnboardingInput,
   PAYMENT_METHOD_LABELS,
   PaymentMethod,
@@ -32,10 +37,7 @@ type PortfolioFilter = 'all' | 'active' | 'expiring_soon' | 'expired';
 function createBlankChild(): ChildOnboardingInput {
   return {
     name: '',
-    age: 8,
-    grade: 'Grade 3',
-    username: '',
-    pin: '',
+    grade: '3rd',
   };
 }
 
@@ -63,6 +65,7 @@ export const AgentDashboard: React.FC = () => {
   // Onboard Parent + Children + Fee Form State
   const [parentName, setParentName] = useState('');
   const [parentContact, setParentContact] = useState('');
+  const [parentEmail, setParentEmail] = useState('');
   const [parentPasscode, setParentPasscode] = useState('');
   const [childRows, setChildRows] = useState<ChildOnboardingInput[]>([
     createBlankChild(),
@@ -158,10 +161,11 @@ export const AgentDashboard: React.FC = () => {
       return (
         row.parent.name.toLowerCase().includes(q) ||
         row.parent.contact.toLowerCase().includes(q) ||
+        row.parent.email.toLowerCase().includes(q) ||
         row.linkedChildren.some(
           (c) =>
             c.name.toLowerCase().includes(q) ||
-            c.username.toLowerCase().includes(q)
+            c.grade.toLowerCase().includes(q)
         )
       );
     });
@@ -205,6 +209,7 @@ export const AgentDashboard: React.FC = () => {
       agentId: agent.id,
       parentName,
       parentContact,
+      parentEmail,
       parentPasscode,
       children: childRows,
       feeAmount: Number(feeAmount) || 0,
@@ -220,12 +225,13 @@ export const AgentDashboard: React.FC = () => {
     }
 
     setNotice(
-      `Onboarded ${parentName} with ${childRows.length} ${
+      `Onboarded ${parentName} (${parentEmail.trim().toLowerCase()}) with ${childRows.length} ${
         childRows.length === 1 ? 'child' : 'children'
       }. Yearly plan valid through ${formatIsoDate(computedExpiry)}.`
     );
     setParentName('');
     setParentContact('');
+    setParentEmail('');
     setParentPasscode('');
     setChildRows([createBlankChild()]);
     setFeeAmount(String(agent.defaultYearlyFee || 1200));
@@ -447,7 +453,7 @@ export const AgentDashboard: React.FC = () => {
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search parent name, contact, or child username…"
+                placeholder="Search parent name, mobile, email, or child name/class…"
                 className="w-full min-h-[44px] pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
@@ -547,7 +553,8 @@ export const AgentDashboard: React.FC = () => {
                             </span>
                           </div>
                           <p className="text-xs text-slate-600 dark:text-slate-400 break-words">
-                            Login ID: {parent.contact}
+                            {parent.contact}
+                            {parent.email ? ` · ${parent.email}` : ''}
                           </p>
                         </div>
 
@@ -579,8 +586,8 @@ export const AgentDashboard: React.FC = () => {
                               <span className="font-semibold text-slate-900 dark:text-white truncate">
                                 {ch.name}
                               </span>
-                              <span className="font-mono text-slate-500 dark:text-slate-400 shrink-0">
-                                @{ch.username} · {ch.grade}
+                              <span className="font-mono text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
+                                {formatIndianClassLabel(ch.grade)} · {ch.totalScore} pts
                               </span>
                             </div>
                           ))}
@@ -729,64 +736,43 @@ export const AgentDashboard: React.FC = () => {
                               {addChildError}
                             </p>
                           )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                            <input
-                              type="text"
-                              required
-                              placeholder="Child Name *"
-                              value={extraChild.name}
-                              onChange={(e) =>
-                                setExtraChild((c) => ({ ...c, name: e.target.value }))
-                              }
-                              className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
-                            />
-                            <input
-                              type="number"
-                              min={3}
-                              max={20}
-                              placeholder="Age"
-                              value={extraChild.age}
-                              onChange={(e) =>
-                                setExtraChild((c) => ({
-                                  ...c,
-                                  age: Number(e.target.value) || 8,
-                                }))
-                              }
-                              className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-white"
-                            />
-                            <input
-                              type="text"
-                              placeholder="Grade (e.g. Grade 4)"
-                              value={extraChild.grade}
-                              onChange={(e) =>
-                                setExtraChild((c) => ({ ...c, grade: e.target.value }))
-                              }
-                              className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
-                            />
-                            <input
-                              type="text"
-                              required
-                              placeholder="Username *"
-                              value={extraChild.username}
-                              onChange={(e) =>
-                                setExtraChild((c) => ({
-                                  ...c,
-                                  username: e.target.value,
-                                }))
-                              }
-                              className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-white"
-                            />
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              required
-                              placeholder="4-digit PIN *"
-                              value={extraChild.pin}
-                              onChange={(e) =>
-                                setExtraChild((c) => ({ ...c, pin: e.target.value }))
-                              }
-                              className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-white"
-                            />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                                Child Name *
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                placeholder="e.g. Aarav"
+                                value={extraChild.name}
+                                onChange={(e) =>
+                                  setExtraChild((c) => ({ ...c, name: e.target.value }))
+                                }
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                                Class / Grade *
+                              </label>
+                              <select
+                                value={extraChild.grade}
+                                onChange={(e) =>
+                                  setExtraChild((c) => ({
+                                    ...c,
+                                    grade: e.target.value as IndianClass,
+                                  }))
+                                }
+                                className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
+                              >
+                                {INDIAN_CLASSES.map((cls) => (
+                                  <option key={cls} value={cls}>
+                                    {formatIndianClassLabel(cls)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
                           <div className="flex justify-end gap-2">
                             <button
@@ -845,7 +831,7 @@ export const AgentDashboard: React.FC = () => {
             <h3 className="text-sm font-bold text-slate-900 dark:text-white">
               1. Parent Account Details
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Parent Full Name *
@@ -862,32 +848,51 @@ export const AgentDashboard: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Mobile or Email (Login ID) *
+                  Mobile Number *
                 </label>
                 <input
-                  type="text"
+                  type="tel"
                   required
                   value={parentContact}
                   onChange={(e) => setParentContact(e.target.value)}
-                  placeholder="e.g. 9811223344 or email"
+                  placeholder="e.g. 9811223344"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Parent Password / PIN *
+                  Parent Google Email *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={parentEmail}
+                  onChange={(e) => setParentEmail(e.target.value)}
+                  placeholder="parent@gmail.com"
+                  className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Backup Passcode / PIN *
                 </label>
                 <input
                   type="text"
                   required
                   value={parentPasscode}
                   onChange={(e) => setParentPasscode(e.target.value)}
-                  placeholder="Share with Parent for /parent login"
+                  placeholder="e.g. 4820"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
             </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Parents sign in with their Google Email on any phone or computer
+              and tap any child card to begin practice — no child passwords
+              needed.
+            </p>
           </div>
 
           {/* Section 2: Linked Child Profiles */}
@@ -932,7 +937,7 @@ export const AgentDashboard: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
                         Child Name *
@@ -951,68 +956,23 @@ export const AgentDashboard: React.FC = () => {
 
                     <div className="space-y-1">
                       <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                        Age
+                        Class / Grade *
                       </label>
-                      <input
-                        type="number"
-                        min={3}
-                        max={20}
-                        value={row.age}
-                        onChange={(e) =>
-                          handleUpdateChildRow(idx, {
-                            age: Number(e.target.value) || 8,
-                          })
-                        }
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-white"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                        Grade / Class
-                      </label>
-                      <input
-                        type="text"
+                      <select
                         value={row.grade}
                         onChange={(e) =>
-                          handleUpdateChildRow(idx, { grade: e.target.value })
+                          handleUpdateChildRow(idx, {
+                            grade: e.target.value as IndianClass,
+                          })
                         }
-                        placeholder="e.g. Grade 4"
                         className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                        Student Username *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={row.username}
-                        onChange={(e) =>
-                          handleUpdateChildRow(idx, { username: e.target.value })
-                        }
-                        placeholder="e.g. aarav_04"
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-white"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                        Student PIN *
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        required
-                        value={row.pin}
-                        onChange={(e) =>
-                          handleUpdateChildRow(idx, { pin: e.target.value })
-                        }
-                        placeholder="e.g. 1234"
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-white"
-                      />
+                      >
+                        {INDIAN_CLASSES.map((cls) => (
+                          <option key={cls} value={cls}>
+                            {formatIndianClassLabel(cls)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>

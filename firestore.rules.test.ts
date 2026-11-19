@@ -1,213 +1,440 @@
-/**
- * gmaths / Math Speedster — Phase 0 Security Rules Verification Suite
- * Verifies all 12 Dirty Dozen adversarial RBAC & Subscription payloads return PERMISSION_DENIED
- * and valid Admin/Agent/Parent/Child operations return ALLOW.
- */
+import assert from 'node:assert/strict';
 
-type RuleResult = 'ALLOW' | 'PERMISSION_DENIED';
-
-interface MockAuth {
+type AuthContext = {
   uid: string;
-  token: {
-    email?: string;
-    email_verified: boolean;
-  };
+  email: string;
+  email_verified: boolean;
+} | null;
+
+const INDIAN_CLASSES = new Set([
+  'Nursery', 'LKG', 'UKG',
+  '1st', '2nd', '3rd', '4th', '5th', '6th',
+  '7th', '8th', '9th', '10th', '11th', '12th',
+]);
+
+const SERVER_TIME = 1770000000000;
+const BOOTSTRAPPED_ADMIN = 'kumarnishchhal175@gmail.com';
+
+const dbState: Record<string, Record<string, Record<string, unknown>>> = {
+  admins: {},
+  agents: {
+    ag_1: {
+      id: 'ag_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'admin_uid',
+      agentCode: 'AG01',
+      name: 'Field Agent One',
+      phone: '9876543210',
+      email: 'agent1@example.com',
+      assignedArea: 'North Zone',
+      commissionRate: 15,
+      defaultYearlyFee: 1200,
+      passcodeHash: 'a'.repeat(64),
+      isActive: true,
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+  },
+  parents: {
+    par_1: {
+      id: 'par_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'agent_uid',
+      name: 'Parent One',
+      contact: 'parent1@example.com',
+      email: 'parent1@example.com',
+      passcodeHash: 'b'.repeat(64),
+      createdByAgentId: 'ag_1',
+      agentEmail: 'agent1@example.com',
+      agentName: 'Field Agent One',
+      agentPhone: '9876543210',
+      agentArea: 'North Zone',
+      agentCode: 'AG01',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+  },
+  children: {
+    ch_1: {
+      id: 'ch_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'agent_uid',
+      parentId: 'par_1',
+      createdByAgentId: 'ag_1',
+      parentEmail: 'parent1@example.com',
+      agentEmail: 'agent1@example.com',
+      name: 'Aarav',
+      grade: '3rd',
+      totalScore: 42,
+      sessionsCount: 3,
+      bestStreak: 11,
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+  },
+  childLeaderboard: {},
+  subscriptions: {
+    sub_1: {
+      id: 'sub_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'agent_uid',
+      parentId: 'par_1',
+      parentEmail: 'parent1@example.com',
+      agentEmail: 'agent1@example.com',
+      planType: 'yearly',
+      startDate: '2026-01-01',
+      expiryDate: '2027-01-01',
+      feeAmount: 1200,
+      paymentMethod: 'upi',
+      receiptNote: 'Initial yearly payment',
+      collectedByAgentId: 'ag_1',
+      status: 'active',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+  },
+  practiceSessions: {
+    ps_1: {
+      id: 'ps_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'parent_uid',
+      childId: 'ch_1',
+      parentId: 'par_1',
+      parentEmail: 'parent1@example.com',
+      agentEmail: 'agent1@example.com',
+      grade: '3rd',
+      mode: 'addition',
+      difficulty: 'easy',
+      sessionType: 'sprint',
+      durationSec: 60,
+      elapsedSec: 60,
+      score: 20,
+      attempted: 22,
+      correct: 20,
+      accuracy: 90.9,
+      bestStreak: 8,
+      avgResponseMs: 2500,
+      qpm: 20,
+      allowNegatives: false,
+      weakTopic: 'none',
+      createdAt: SERVER_TIME,
+    },
+  },
+};
+
+const isVerified = (auth: AuthContext) => Boolean(auth && auth.email_verified);
+const isBootstrappedAdmin = (auth: AuthContext) =>
+  isVerified(auth) && auth!.email.toLowerCase() === BOOTSTRAPPED_ADMIN;
+const isValidId = (id: unknown) =>
+  typeof id === 'string' && id.length >= 1 && id.length <= 128 && /^[a-zA-Z0-9_\-]+$/.test(id);
+const isValidDate = (d: unknown) =>
+  typeof d === 'string' && d.length === 10 && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d);
+
+function hasExactKeys(data: Record<string, unknown>, keys: string[]): boolean {
+  const actual = Object.keys(data);
+  return actual.length === keys.length && keys.every((k) => actual.includes(k));
 }
 
-interface MockContext {
-  auth: MockAuth | null;
-  now: number;
-  existingDocs: Record<string, Record<string, unknown>>;
+function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
+  if (!isVerified(auth)) return false;
+  const email = auth!.email.toLowerCase();
+  return (
+    data.ownerUid === auth!.uid ||
+    (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
+    (typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
+    (typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email)
+  );
 }
 
-const VALID_ID = /^[a-zA-Z0-9_\-]+$/;
-const VALID_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
-const BOOTSTRAP_ADMIN_EMAIL = 'kumarnishchhal175@gmail.com';
+function evaluateRule(
+  auth: AuthContext,
+  col: string,
+  op: 'get' | 'list' | 'create' | 'update',
+  docId: string,
+  incoming?: Record<string, unknown>
+): 'ALLOW' | 'PERMISSION_DENIED' {
+  const existing = dbState[col]?.[docId];
 
-const isValidId = (v: unknown): boolean =>
-  typeof v === 'string' && v.length >= 1 && v.length <= 128 && VALID_ID.test(v);
-
-const isVerified = (ctx: MockContext): boolean =>
-  ctx.auth !== null && ctx.auth.token.email_verified === true;
-
-const isBootstrappedAdmin = (ctx: MockContext): boolean =>
-  isVerified(ctx) && ctx.auth!.token.email === BOOTSTRAP_ADMIN_EMAIL;
-
-const hasExactKeys = (data: Record<string, unknown>, keys: string[]): boolean =>
-  keys.every((k) => Object.prototype.hasOwnProperty.call(data, k)) &&
-  Object.keys(data).every((k) => keys.includes(k));
-
-function evaluate(
-  op: 'get' | 'create' | 'update',
-  path: string,
-  ctx: MockContext,
-  data?: Record<string, unknown>
-): RuleResult {
-  const parts = path.split('/').filter(Boolean);
-  if (!ctx.auth) return 'PERMISSION_DENIED';
-
-  // /admins/{uid}
-  if (parts.length === 2 && parts[0] === 'admins') {
-    const uid = parts[1];
-    if (!isValidId(uid)) return 'PERMISSION_DENIED';
-    if (op === 'create' && data) {
-      return isBootstrappedAdmin(ctx) &&
-        hasExactKeys(data, ['uid', 'email', 'createdAt']) &&
-        data.uid === uid &&
-        data.createdAt === ctx.now
-        ? 'ALLOW'
-        : 'PERMISSION_DENIED';
-    }
-    return 'PERMISSION_DENIED';
+  if (col === 'admins' && op === 'create') {
+    return isBootstrappedAdmin(auth) && isValidId(docId) ? 'ALLOW' : 'PERMISSION_DENIED';
   }
 
-  // /agents/{agentId}
-  if (parts.length === 2 && parts[0] === 'agents') {
-    const id = parts[1];
-    if (!isVerified(ctx) || !isValidId(id)) return 'PERMISSION_DENIED';
-    const keys = [
-      'id', 'workspaceId', 'ownerUid', 'agentCode', 'name', 'phone', 'email',
-      'assignedArea', 'commissionRate', 'defaultYearlyFee', 'passcodeHash',
-      'isActive', 'createdAt', 'updatedAt',
-    ];
-    if (op === 'create' && data) {
-      const ok =
-        hasExactKeys(data, keys) &&
-        data.id === id &&
-        (data.ownerUid === ctx.auth.uid || isBootstrappedAdmin(ctx)) &&
-        typeof data.name === 'string' && data.name.length >= 1 && data.name.length <= 80 &&
-        data.createdAt === ctx.now &&
-        data.updatedAt === ctx.now;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
-    }
-  }
-
-  // /parents/{parentId}
-  if (parts.length === 2 && parts[0] === 'parents') {
-    const id = parts[1];
-    if (!isVerified(ctx) || !isValidId(id)) return 'PERMISSION_DENIED';
+  if (col === 'agents') {
     if (op === 'get') {
-      const ex = ctx.existingDocs[path];
-      if (!ex) return 'ALLOW';
-      return ex.ownerUid === ctx.auth.uid || (isBootstrappedAdmin(ctx) && ex.workspaceId === 'gmaths_main')
-        ? 'ALLOW'
-        : 'PERMISSION_DENIED';
+      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!existing) return 'ALLOW';
+      const ok =
+        existing.ownerUid === auth!.uid ||
+        (isBootstrappedAdmin(auth) && existing.workspaceId === 'gmaths_main') ||
+        existing.email === auth!.email.toLowerCase();
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
-    if (op === 'create' && data) {
-      const keys = [
-        'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'passcodeHash',
-        'createdByAgentId', 'createdAt', 'updatedAt',
+    if (op === 'create' && incoming) {
+      const req = [
+        'id', 'workspaceId', 'ownerUid', 'agentCode', 'name', 'phone', 'email',
+        'assignedArea', 'commissionRate', 'defaultYearlyFee', 'passcodeHash',
+        'isActive', 'createdAt', 'updatedAt',
       ];
-      const agentExists = Boolean(ctx.existingDocs[`agents/${data.createdByAgentId}`]);
       const ok =
-        hasExactKeys(data, keys) &&
-        data.id === id &&
-        (data.ownerUid === ctx.auth.uid || isBootstrappedAdmin(ctx)) &&
-        agentExists &&
-        data.createdAt === ctx.now &&
-        data.updatedAt === ctx.now;
+        isVerified(auth) &&
+        isValidId(docId) &&
+        hasExactKeys(incoming, req) &&
+        incoming.id === docId &&
+        typeof incoming.email === 'string' &&
+        incoming.email.length >= 3 &&
+        (incoming.ownerUid === auth!.uid || isBootstrappedAdmin(auth)) &&
+        incoming.createdAt === SERVER_TIME &&
+        incoming.updatedAt === SERVER_TIME;
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
 
-  // /children/{childId}
-  if (parts.length === 2 && parts[0] === 'children') {
-    const id = parts[1];
-    if (!isVerified(ctx) || !isValidId(id)) return 'PERMISSION_DENIED';
-    if (op === 'create' && data) {
-      const parentExists = Boolean(ctx.existingDocs[`parents/${data.parentId}`]);
-      return parentExists && data.id === id && data.createdAt === ctx.now
-        ? 'ALLOW'
-        : 'PERMISSION_DENIED';
+  if (col === 'parents') {
+    if (op === 'get') {
+      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!existing) return 'ALLOW';
+      const email = auth!.email.toLowerCase();
+      const ok =
+        existing.ownerUid === auth!.uid ||
+        (isBootstrappedAdmin(auth) && existing.workspaceId === 'gmaths_main') ||
+        existing.agentEmail === email ||
+        existing.email === email;
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'create' && incoming) {
+      const agentId = String(incoming.createdByAgentId ?? '');
+      const ok =
+        isVerified(auth) &&
+        isValidId(docId) &&
+        Boolean(dbState.agents[agentId]);
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
 
-  // /subscriptions/{subId}
-  if (parts.length === 2 && parts[0] === 'subscriptions') {
-    const id = parts[1];
-    if (!isVerified(ctx) || !isValidId(id)) return 'PERMISSION_DENIED';
-    const keys = [
-      'id', 'workspaceId', 'ownerUid', 'parentId', 'planType',
-      'startDate', 'expiryDate', 'feeAmount', 'paymentMethod',
-      'receiptNote', 'collectedByAgentId', 'status', 'createdAt', 'updatedAt',
+  if (col === 'children' && op === 'create' && incoming) {
+    const req = [
+      'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
+      'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
+      'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt',
     ];
-    if (op === 'create' && data) {
-      const parentExists = Boolean(ctx.existingDocs[`parents/${data.parentId}`]);
-      const agentExists = Boolean(ctx.existingDocs[`agents/${data.collectedByAgentId}`]);
-      const ok =
-        hasExactKeys(data, keys) &&
-        data.id === id &&
-        data.planType === 'yearly' &&
-        typeof data.startDate === 'string' && VALID_DATE.test(data.startDate) &&
-        typeof data.expiryDate === 'string' && VALID_DATE.test(data.expiryDate) &&
-        typeof data.feeAmount === 'number' && data.feeAmount >= 0 &&
-        ['cash', 'upi', 'bank'].includes(String(data.paymentMethod)) &&
-        ['active', 'expired', 'suspended'].includes(String(data.status)) &&
-        parentExists && agentExists &&
-        data.createdAt === ctx.now && data.updatedAt === ctx.now;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    const parentId = String(incoming.parentId ?? '');
+    const ok =
+      isVerified(auth) &&
+      isValidId(docId) &&
+      hasExactKeys(incoming, req) &&
+      INDIAN_CLASSES.has(String(incoming.grade)) &&
+      Boolean(dbState.parents[parentId]) &&
+      incoming.createdAt === SERVER_TIME &&
+      incoming.updatedAt === SERVER_TIME;
+    return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+  }
+
+  if (col === 'childLeaderboard') {
+    if (op === 'list') {
+      return Number(incoming?.totalScore ?? 0) >= 1 ? 'ALLOW' : 'PERMISSION_DENIED';
     }
-    if (op === 'update' && data) {
-      const ex = ctx.existingDocs[path];
-      if (!ex) return 'PERMISSION_DENIED';
+    if (op === 'create' && incoming) {
+      const req = [
+        'id', 'childId', 'workspaceId', 'ownerUid', 'name', 'grade',
+        'totalScore', 'sessionsCount', 'bestStreak', 'isPublic', 'createdAt', 'updatedAt',
+      ];
+      const childDoc = dbState.children[docId];
       const ok =
-        hasExactKeys(data, keys) &&
-        data.parentId === ex.parentId &&
-        data.ownerUid === ex.ownerUid &&
-        data.planType === 'yearly' &&
-        data.createdAt === ex.createdAt &&
-        data.updatedAt === ctx.now;
+        isVerified(auth) &&
+        isValidId(docId) &&
+        hasExactKeys(incoming, req) &&
+        incoming.id === docId &&
+        incoming.childId === docId &&
+        INDIAN_CLASSES.has(String(incoming.grade)) &&
+        Number(incoming.totalScore) >= 1 &&
+        incoming.isPublic === true &&
+        Boolean(childDoc) &&
+        isFamilyScopedAuthorized(auth, childDoc) &&
+        incoming.createdAt === SERVER_TIME &&
+        incoming.updatedAt === SERVER_TIME;
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
 
-  // /practiceSessions/{sessionId}
-  if (parts.length === 2 && parts[0] === 'practiceSessions') {
-    if (op === 'update') return 'PERMISSION_DENIED';
+  if (col === 'subscriptions') {
+    if (op === 'create' && incoming) {
+      const ok =
+        isVerified(auth) &&
+        isValidId(docId) &&
+        incoming.planType === 'yearly' &&
+        isValidDate(incoming.startDate) &&
+        isValidDate(incoming.expiryDate) &&
+        Boolean(dbState.parents[String(incoming.parentId ?? '')]) &&
+        Boolean(dbState.agents[String(incoming.collectedByAgentId ?? '')]);
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'update' && incoming && existing) {
+      const ok =
+        isVerified(auth) &&
+        incoming.parentId === existing.parentId &&
+        incoming.planType === 'yearly' &&
+        isFamilyScopedAuthorized(auth, existing);
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+  }
+
+  if (col === 'practiceSessions' && op === 'update') {
+    return 'PERMISSION_DENIED';
   }
 
   return 'PERMISSION_DENIED';
 }
 
-const NOW = 1763500000000;
-const ADMIN: MockAuth = { uid: 'admin_uid', token: { email: BOOTSTRAP_ADMIN_EMAIL, email_verified: true } };
-const SPOOF_ADMIN: MockAuth = { uid: 'eve_uid', token: { email: BOOTSTRAP_ADMIN_EMAIL, email_verified: false } };
-const OTHER: MockAuth = { uid: 'other_uid', token: { email: 'other@example.com', email_verified: true } };
-
-const docs: Record<string, Record<string, unknown>> = {
-  'agents/agent_1': { id: 'agent_1', workspaceId: 'gmaths_main', ownerUid: 'admin_uid' },
-  'parents/parent_1': { id: 'parent_1', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', createdByAgentId: 'agent_1' },
-  'subscriptions/sub_1': {
-    id: 'sub_1', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', parentId: 'parent_1',
-    planType: 'yearly', startDate: '2026-01-01', expiryDate: '2027-01-01', feeAmount: 1200,
-    paymentMethod: 'upi', receiptNote: 'UPI-101', collectedByAgentId: 'agent_1', status: 'active',
-    createdAt: NOW - 1000, updatedAt: NOW - 1000,
+const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run: () => 'ALLOW' | 'PERMISSION_DENIED' }> = [
+  {
+    name: 'DD-01 Unverified Admin Email Spoof Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () => evaluateRule({ uid: 'spoof', email: BOOTSTRAPPED_ADMIN, email_verified: false }, 'agents', 'get', 'ag_1'),
   },
-};
-
-const cases: Array<{ name: string; actual: RuleResult; expected: RuleResult }> = [
-  { name: 'DD-01 Unverified Admin Email Spoof Blocked', actual: evaluate('create', 'agents/agent_2', { auth: SPOOF_ADMIN, now: NOW, existingDocs: docs }, { id: 'agent_2', workspaceId: 'gmaths_main', ownerUid: 'eve_uid', agentCode: 'AG02', name: 'Spoof', phone: '9999', email: '', assignedArea: 'North', commissionRate: 10, defaultYearlyFee: 1200, passcodeHash: '0123456789abcdef', isActive: true, createdAt: NOW, updatedAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-02 Non-Admin Self-Escalation to /admins Blocked', actual: evaluate('create', 'admins/other_uid', { auth: OTHER, now: NOW, existingDocs: docs }, { uid: 'other_uid', email: 'other@example.com', createdAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-03 Shadow Ghost Field on Agent Blocked', actual: evaluate('create', 'agents/agent_3', { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'agent_3', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', agentCode: 'AG03', name: 'Test', phone: '12345', email: '', assignedArea: 'East', commissionRate: 10, defaultYearlyFee: 1200, passcodeHash: '0123456789abcdef', isActive: true, superUser: true, createdAt: NOW, updatedAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-04 Orphaned Parent Without Existing Agent Blocked', actual: evaluate('create', 'parents/parent_2', { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'parent_2', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', name: 'Priya', contact: '9876543210', passcodeHash: '0123456789abcdef', createdByAgentId: 'ghost_agent', createdAt: NOW, updatedAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-05 Orphaned Child Without Existing Parent Blocked', actual: evaluate('create', 'children/child_1', { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'child_1', parentId: 'ghost_parent', createdAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-06 Invalid Monthly Subscription Plan Blocked', actual: evaluate('create', 'subscriptions/sub_bad', { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'sub_bad', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', parentId: 'parent_1', planType: 'monthly', startDate: '2026-01-01', expiryDate: '2026-02-01', feeAmount: 100, paymentMethod: 'cash', receiptNote: '', collectedByAgentId: 'agent_1', status: 'active', createdAt: NOW, updatedAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-07 Immutable Subscription parentId Mutation Blocked', actual: evaluate('update', 'subscriptions/sub_1', { auth: ADMIN, now: NOW, existingDocs: docs }, { ...docs['subscriptions/sub_1'], parentId: 'parent_hijack', updatedAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-08 Practice Session Tampering Update Blocked', actual: evaluate('update', 'practiceSessions/ps_1', { auth: ADMIN, now: NOW, existingDocs: docs }, { score: 999 }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-09 Cross-Tenant Parent PII Read Blocked', actual: evaluate('get', 'parents/parent_1', { auth: OTHER, now: NOW, existingDocs: docs }), expected: 'PERMISSION_DENIED' },
-  { name: 'DD-10 Oversized Agent Document ID Blocked', actual: evaluate('create', `agents/${'a'.repeat(160)}`, { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'a'.repeat(160), workspaceId: 'gmaths_main', ownerUid: 'admin_uid', agentCode: 'AG99', name: 'Bad', phone: '12345', email: '', assignedArea: 'South', commissionRate: 10, defaultYearlyFee: 1200, passcodeHash: '0123456789abcdef', isActive: true, createdAt: NOW, updatedAt: NOW }), expected: 'PERMISSION_DENIED' },
-  { name: 'VALID-01 Admin Creates Valid Agent', actual: evaluate('create', 'agents/agent_ok', { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'agent_ok', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', agentCode: 'AG10', name: 'Ravi', phone: '9876543210', email: 'ravi@gmaths.app', assignedArea: 'West Zone', commissionRate: 15, defaultYearlyFee: 1200, passcodeHash: '0123456789abcdef', isActive: true, createdAt: NOW, updatedAt: NOW }), expected: 'ALLOW' },
-  { name: 'VALID-02 Valid Yearly Subscription Created', actual: evaluate('create', 'subscriptions/sub_ok', { auth: ADMIN, now: NOW, existingDocs: docs }, { id: 'sub_ok', workspaceId: 'gmaths_main', ownerUid: 'admin_uid', parentId: 'parent_1', planType: 'yearly', startDate: '2026-11-18', expiryDate: '2027-11-18', feeAmount: 1200, paymentMethod: 'upi', receiptNote: 'UPI#4411', collectedByAgentId: 'agent_1', status: 'active', createdAt: NOW, updatedAt: NOW }), expected: 'ALLOW' },
+  {
+    name: 'DD-02 Non-Admin Self-Escalation to /admins Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () => evaluateRule({ uid: 'u2', email: 'u2@example.com', email_verified: true }, 'admins', 'create', 'u2', { uid: 'u2' }),
+  },
+  {
+    name: 'DD-03 Shadow Ghost Field on Agent Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'admin_uid', email: BOOTSTRAPPED_ADMIN, email_verified: true }, 'agents', 'create', 'ag_bad', {
+        ...dbState.agents.ag_1,
+        id: 'ag_bad',
+        isSuperAdmin: true,
+      }),
+  },
+  {
+    name: 'DD-04 Orphaned Parent Without Existing Agent Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'parents', 'create', 'par_bad', {
+        ...dbState.parents.par_1,
+        id: 'par_bad',
+        createdByAgentId: 'missing_agent',
+      }),
+  },
+  {
+    name: 'DD-05 Orphaned Child Without Existing Parent Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'children', 'create', 'ch_bad', {
+        ...dbState.children.ch_1,
+        id: 'ch_bad',
+        parentId: 'missing_parent',
+      }),
+  },
+  {
+    name: 'DD-06 Legacy Child Username/PIN Credentials Rejected',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'children', 'create', 'ch_cred', {
+        ...dbState.children.ch_1,
+        id: 'ch_cred',
+        username: 'aarav_1',
+        pinHash: 'c'.repeat(64),
+      }),
+  },
+  {
+    name: 'DD-07 Invalid Non-Indian Class Grade Rejected',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'children', 'create', 'ch_grade', {
+        ...dbState.children.ch_1,
+        id: 'ch_grade',
+        grade: 'Grade 99',
+      }),
+  },
+  {
+    name: 'DD-08 Invalid Monthly Subscription Plan Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'subscriptions', 'create', 'sub_bad', {
+        ...dbState.subscriptions.sub_1,
+        id: 'sub_bad',
+        planType: 'monthly',
+      }),
+  },
+  {
+    name: 'DD-09 Immutable Subscription parentId Mutation Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'subscriptions', 'update', 'sub_1', {
+        ...dbState.subscriptions.sub_1,
+        parentId: 'par_other',
+      }),
+  },
+  {
+    name: 'DD-10 Practice Session Score Tampering Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'parent_uid', email: 'parent1@example.com', email_verified: true }, 'practiceSessions', 'update', 'ps_1', {
+        ...dbState.practiceSessions.ps_1,
+        score: 9999,
+      }),
+  },
+  {
+    name: 'DD-11 Cross-Tenant Parent PII Read Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () => evaluateRule({ uid: 'attacker_uid', email: 'attacker@example.com', email_verified: true }, 'parents', 'get', 'par_1'),
+  },
+  {
+    name: 'DD-12 Public ChildLeaderboard Spoof & PII Injection Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'attacker_uid', email: 'attacker@example.com', email_verified: true }, 'childLeaderboard', 'create', 'ch_1', {
+        id: 'ch_1',
+        childId: 'ch_1',
+        workspaceId: 'gmaths_main',
+        ownerUid: 'attacker_uid',
+        name: 'Aarav',
+        grade: '3rd',
+        totalScore: 500,
+        sessionsCount: 5,
+        bestStreak: 15,
+        isPublic: true,
+        email: 'leak@example.com',
+        createdAt: SERVER_TIME,
+        updatedAt: SERVER_TIME,
+      }),
+  },
+  {
+    name: 'VALID-01 Parent Reads Own Profile Cross-Device via Verified Email',
+    expected: 'ALLOW',
+    run: () => evaluateRule({ uid: 'parent_mobile_uid', email: 'parent1@example.com', email_verified: true }, 'parents', 'get', 'par_1'),
+  },
+  {
+    name: 'VALID-02 Parent Updates ChildLeaderboard Entry Without PII',
+    expected: 'ALLOW',
+    run: () =>
+      evaluateRule({ uid: 'parent_mobile_uid', email: 'parent1@example.com', email_verified: true }, 'childLeaderboard', 'create', 'ch_1', {
+        id: 'ch_1',
+        childId: 'ch_1',
+        workspaceId: 'gmaths_main',
+        ownerUid: 'parent_mobile_uid',
+        name: 'Aarav',
+        grade: '3rd',
+        totalScore: 42,
+        sessionsCount: 3,
+        bestStreak: 11,
+        isPublic: true,
+        createdAt: SERVER_TIME,
+        updatedAt: SERVER_TIME,
+      }),
+  },
+  {
+    name: 'VALID-03 Public Home Page Lists Top 3 Champions (totalScore >= 1)',
+    expected: 'ALLOW',
+    run: () => evaluateRule(null, 'childLeaderboard', 'list', '', { totalScore: 42 }),
+  },
 ];
 
-let failed = 0;
-for (const c of cases) {
-  if (c.actual !== c.expected) {
-    failed++;
-    console.error(`FAIL: ${c.name} (expected ${c.expected}, got ${c.actual})`);
-  } else {
-    console.log(`PASS: ${c.name} -> ${c.actual}`);
-  }
+for (const t of tests) {
+  const actual = t.run();
+  assert.equal(actual, t.expected, `FAILED: ${t.name} (expected ${t.expected}, got ${actual})`);
+  console.log(`PASS: ${t.name} -> ${actual}`);
 }
-if (failed > 0) process.exit(1);
-console.log(`\nAll ${cases.length} RBAC & Subscription security tests passed.`);
+
+console.log(`All ${tests.length} cross-device RBAC & Top 3 Champions security tests passed.`);

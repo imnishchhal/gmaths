@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeftRight,
+  ArrowLeft,
   BarChart3,
   Briefcase,
   Check,
-  GraduationCap,
   History,
   LogOut,
   Menu,
@@ -37,7 +36,6 @@ export const Header: React.FC<HeaderProps> = ({
     isConfigured,
     authLoading,
     signInWithGoogle,
-    signOutUser,
     updateName,
   } = useFirebase();
   const { roleSession, logoutRole, exitChildModeToParent } = usePlatform();
@@ -138,10 +136,12 @@ export const Header: React.FC<HeaderProps> = ({
       : 'Student'
     : null;
 
+  const isChildSession = roleSession?.role === 'child';
+
   return (
     <>
       <header className="sticky top-0 z-30 w-full max-w-[100vw] bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-3 md:gap-8">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3 md:gap-8">
           {/* Left: Mobile Drawer Button + Brand Wordmark */}
           <div className="flex items-center gap-1.5 min-w-0 shrink-0">
             <button
@@ -189,56 +189,46 @@ export const Header: React.FC<HeaderProps> = ({
             ))}
           </nav>
 
-          {/* Right: Single Primary Account / Sign-in Action */}
-          <div className="relative shrink-0" ref={menuRef}>
+          {/* Right: Prominent "Back to Parent Portal" in Child Mode OR Account Menu */}
+          <div className="relative flex items-center gap-2 shrink-0" ref={menuRef}>
+            {isChildSession && (
+              <button
+                type="button"
+                onClick={() => {
+                  exitChildModeToParent();
+                  go('/parent');
+                }}
+                className="inline-flex items-center gap-1.5 min-h-[44px] px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
+              >
+                <ArrowLeft className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">Back to Parent Portal</span>
+                <span className="sm:hidden">Parent Portal</span>
+              </button>
+            )}
+
             {activeAccountLabel ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => setMenuOpen((o) => !o)}
-                  className="inline-flex items-center gap-2 min-h-[44px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium text-slate-900 dark:text-slate-100 transition-colors whitespace-nowrap shrink-0 max-w-[155px] sm:max-w-[200px]"
-                >
-                  <UserIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                  <span className="truncate">{activeAccountLabel}</span>
-                </button>
+                {!isChildSession && (
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen((o) => !o)}
+                    className="inline-flex items-center gap-2 min-h-[44px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium text-slate-900 dark:text-slate-100 transition-colors whitespace-nowrap shrink-0 max-w-[155px] sm:max-w-[200px]"
+                  >
+                    <UserIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="truncate">{activeAccountLabel}</span>
+                  </button>
+                )}
 
-                {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg p-4 space-y-4 z-50">
+                {menuOpen && !isChildSession && (
+                  <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg p-4 space-y-4 z-50">
                     {roleSession && (
-                      <div className="space-y-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                      <div className="space-y-1.5 pb-3 border-b border-slate-100 dark:border-slate-800">
                         <p className="text-xs text-slate-500 dark:text-slate-400">
                           Active Portal · {activeRoleTag}
                         </p>
                         <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                           {roleSession.displayName}
                         </p>
-                        <div className="flex flex-wrap gap-2 pt-1">
-                          {roleSession.role === 'child' &&
-                            roleSession.returnToParentId && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  exitChildModeToParent();
-                                  go('/parent');
-                                }}
-                                className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold whitespace-nowrap"
-                              >
-                                <ArrowLeftRight className="w-3.5 h-3.5" />
-                                Back to Parent
-                              </button>
-                            )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              logoutRole();
-                              setMenuOpen(false);
-                            }}
-                            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
-                          >
-                            <LogOut className="w-3.5 h-3.5" />
-                            Sign out {activeRoleTag}
-                          </button>
-                        </div>
                       </div>
                     )}
 
@@ -246,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <div className="space-y-3">
                         <div>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Cloud Sync (Google)
+                            Google Account (Live Firestore Sync)
                           </p>
                           <p className="text-xs font-medium text-slate-900 dark:text-white truncate">
                             {user.email}
@@ -287,12 +277,12 @@ export const Header: React.FC<HeaderProps> = ({
                           type="button"
                           onClick={() => {
                             setMenuOpen(false);
-                            void signOutUser();
+                            void logoutRole();
                           }}
-                          className="w-full min-h-[40px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+                          className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
                         >
                           <LogOut className="w-3.5 h-3.5" />
-                          Disconnect Google Sync
+                          Sign out
                         </button>
                       </div>
                     ) : (
@@ -305,7 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
                           }}
                           className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-xs font-semibold whitespace-nowrap"
                         >
-                          Connect Google Cloud Sync
+                          Sign in with Google
                         </button>
                       )
                     )}
@@ -319,7 +309,7 @@ export const Header: React.FC<HeaderProps> = ({
                 disabled={authLoading}
                 className="min-h-[44px] px-3.5 sm:px-4 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
               >
-                Sign in
+                {authLoading ? 'Signing in…' : 'Sign in'}
               </button>
             )}
           </div>
@@ -409,12 +399,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </p>
                 {[
                   {
-                    label: 'Student Login',
-                    icon: GraduationCap,
-                    active: route === '/child',
-                    onClick: () => go('/child'),
-                  },
-                  {
                     label: 'Parent Portal',
                     icon: Users,
                     active: route === '/parent',
@@ -453,20 +437,34 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {isConfigured && !user && (
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+              {user ? (
                 <button
                   type="button"
                   onClick={() => {
                     setDrawerOpen(false);
-                    void signInWithGoogle();
+                    void logoutRole();
                   }}
-                  className="w-full min-h-[48px] px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-sm font-semibold whitespace-nowrap"
+                  className="w-full min-h-[48px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap"
                 >
-                  Connect Google Cloud Sync
+                  <LogOut className="w-4 h-4" />
+                  Sign out ({user.email?.split('@')[0]})
                 </button>
-              </div>
-            )}
+              ) : (
+                isConfigured && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDrawerOpen(false);
+                      void signInWithGoogle();
+                    }}
+                    className="w-full min-h-[48px] px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-sm font-semibold whitespace-nowrap"
+                  >
+                    Sign in with Google
+                  </button>
+                )
+              )}
+            </div>
           </aside>
         </div>
       )}

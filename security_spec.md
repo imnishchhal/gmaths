@@ -1,35 +1,30 @@
-# gmaths / Math Speedster — Security Specification (Phase 0 TDD)
+# Security Specification — Math Speedster (`gmaths`) Cross-Device RBAC & Top 3 Champions
 
 ## 1. Data Invariants
+1. **Default-Deny Catch-All**: No unmatched collection or path is readable or writable.
+2. **Verified Email Identity**: All writes across `/users`, `/agents`, `/parents`, `/children`, `/childLeaderboard`, `/subscriptions`, and `/practiceSessions` require `request.auth != null && request.auth.token.email_verified == true`.
+3. **Cross-Device Role Isolation Without `get()` in `list` Queries**:
+   - **Admin** (`kumarnishchhal175@gmail.com` verified or `/admins/{uid}`): full workspace access (`workspaceId == 'gmaths_main'`).
+   - **Agent**: scoped via `resource.data.email == request.auth.token.email` (on `/agents`) and `resource.data.agentEmail == request.auth.token.email` (on `/parents`, `/children`, `/subscriptions`, `/practiceSessions`).
+   - **Parent**: scoped via `resource.data.email == request.auth.token.email` (on `/parents`) and `resource.data.parentEmail == request.auth.token.email` (on `/children`, `/subscriptions`, `/practiceSessions`).
+4. **Credential-Free Children + Indian Class Enum**: `/children/{childId}` strictly forbids legacy `username`, `pinHash`, or `age` fields via `hasOnly()`, and enforces `grade in ['Nursery','LKG','UKG','1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th','11th','12th']`.
+5. **PII-Free Public Top 3 Champions (`/childLeaderboard/{childId}`)**: Contains strictly `name`, `grade`, `totalScore`, `sessionsCount`, `bestStreak`, `isPublic: true` (zero emails/phones). Public `list` enforces `resource.data.totalScore >= 1` using single-field index `totalScore DESC` (`limit(3)`), and writes require owning or parent authority verified via `get(/children/{childId})`.
+6. **Referential Integrity & Immutability**:
+   - `/parents/{parentId}` requires `exists(/agents/{createdByAgentId})`.
+   - `/children/{childId}` requires `exists(/parents/{parentId})`.
+   - `/subscriptions/{subscriptionId}` requires `planType == 'yearly'`, `exists(/parents/{parentId})`, and `exists(/agents/{collectedByAgentId})`.
+   - `/practiceSessions/{sessionId}` requires `exists(/children/{childId})` and `exists(/parents/{parentId})`, and is immutable (`allow update: if false`).
 
-1. **Identity & Workspace Ownership**: Every document under `/users/{userId}`, `/users/{userId}/sessions/{sessionId}`, and RBAC collections (`/agents`, `/parents`, `/children`, `/subscriptions`, `/practiceSessions`) enforces verified Google authentication (`request.auth.token.email_verified == true`) and strict `ownerUid == request.auth.uid` or bootstrapped Admin (`kumarnishchhal175@gmail.com`) isolation.
-2. **No Self-Assigned Admin Privileges**: Users cannot write `/admins/{uid}` unless already a bootstrapped Admin (`kumarnishchhal175@gmail.com` with `email_verified == true`).
-3. **PII Isolation**: User/Agent/Parent contact details are never exposed to unrelated authenticated users (`allow list` always enforces `resource.data.ownerUid == request.auth.uid` or bootstrapped Admin scoped to `workspaceId == 'gmaths_main'`). Public `/leaderboard/{entryId}` prohibits PII fields via `hasOnly()`.
-4. **Relational Integrity (Master Gate)**:
-   - Creating a `/users/{userId}/sessions/{sessionId}` requires `/users/{userId}` to exist.
-   - Creating a `/parents/{parentId}` requires its referencing `/agents/{createdByAgentId}` to exist.
-   - Creating a `/children/{childId}` requires its referencing `/parents/{parentId}` to exist.
-   - Creating a `/subscriptions/{subscriptionId}` requires both `/parents/{parentId}` and `/agents/{collectedByAgentId}` to exist.
-   - Creating a `/practiceSessions/{sessionId}` requires both `/children/{childId}` and `/parents/{parentId}` to exist.
-5. **Strict Yearly Subscription Integrity**: `planType` MUST equal `'yearly'`, `startDate`/`expiryDate` MUST match `YYYY-MM-DD`, `feeAmount` MUST be `0..1000000`, `paymentMethod` MUST be in `['cash', 'upi', 'bank']`, and `status` MUST be in `['active', 'expired', 'suspended']`.
-6. **Immutable Historical Logs**: `/users/{userId}/sessions/{sessionId}` and `/practiceSessions/{sessionId}` forbid updates (`allow update: if false`).
-7. **Temporal & Volumetric Integrity**: `createdAt == request.time`, `updatedAt == request.time`, all IDs match `^[a-zA-Z0-9_\-]+$` (`<= 128`), and every string enforces explicit `.size()` bounds.
-
----
-
-## 2. The "Dirty Dozen" Adversarial Payloads
-
-| # | Attack Vector | Target Path | Adversarial Payload / Context | Expected Outcome |
-|---|---|---|---|---|
-| 1 | **Identity Spoofing (Profile)** | `/users/victim_uid` (create as `attacker_uid`) | Spoofed `uid` != `request.auth.uid` | `PERMISSION_DENIED` |
-| 2 | **Unverified Email Write** | `/agents/agent_1` (auth with `email_verified: false`) | Even with admin email, `email_verified: false` | `PERMISSION_DENIED` |
-| 3 | **Self-Assigned Admin Escalation** | `/admins/attacker_uid` (create as non-admin) | `{ uid: "attacker_uid", email: "eve@example.com", createdAt: SERVER_TIME }` | `PERMISSION_DENIED` |
-| 4 | **Shadow Field Injection on Agent** | `/agents/agent_1` | Valid agent fields + ghost field `superUser: true` | `PERMISSION_DENIED` |
-| 5 | **Orphaned Parent Creation** | `/parents/parent_1` | References non-existent `createdByAgentId: "missing_agent"` | `PERMISSION_DENIED` |
-| 6 | **Orphaned Child Creation** | `/children/child_1` | References non-existent `parentId: "missing_parent"` | `PERMISSION_DENIED` |
-| 7 | **Invalid Subscription Plan Type** | `/subscriptions/sub_1` | `{ planType: "monthly", feeAmount: -500, ... }` | `PERMISSION_DENIED` |
-| 8 | **Immutable Subscription Owner Mutation** | `/subscriptions/sub_1` (`update`) | Attempts to change `parentId` or `ownerUid` | `PERMISSION_DENIED` |
-| 9 | **Practice Session Tampering** | `/practiceSessions/ps_1` (`update`) | Attempts to raise child `score` after completion | `PERMISSION_DENIED` |
-| 10 | **Cross-Tenant PII Read** | `/parents/parent_1` (`get` as unrelated user) | Non-owner, non-admin authenticated read | `PERMISSION_DENIED` |
-| 11 | **Oversized ID / String Poisoning** | `/agents/${'x'.repeat(160)}` | 160-char document ID or oversized `name` | `PERMISSION_DENIED` |
-| 12 | **Leaderboard Slot Spam & PII Injection** | `/leaderboard/spam_id` | Non-deterministic ID or injected `email` field | `PERMISSION_DENIED` |
+## 2. The "Dirty Dozen" Payloads (All Must Return PERMISSION_DENIED)
+1. **DD-01 (Unverified Admin Spoof)**: Admin email with `email_verified: false` reading `/agents`.
+2. **DD-02 (Self-Escalation to `/admins`)**: Non-admin user creating `/admins/{uid}`.
+3. **DD-03 (Shadow Ghost Field on Agent)**: Creating `/agents/{id}` with extra field `isSuperAdmin: true`.
+4. **DD-04 (Orphaned Parent)**: Creating `/parents/{id}` referencing nonexistent `createdByAgentId`.
+5. **DD-05 (Orphaned Child)**: Creating `/children/{id}` referencing nonexistent `parentId`.
+6. **DD-06 (Legacy Child Credentials Rejected)**: Creating `/children/{id}` with forbidden `username` or `pinHash` field.
+7. **DD-07 (Invalid Grade Enum on Child)**: Creating `/children/{id}` with `grade: 'Grade 99'` outside Indian school classes.
+8. **DD-08 (Invalid Monthly Subscription)**: Creating `/subscriptions/{id}` with `planType: 'monthly'`.
+9. **DD-09 (Immutable Subscription `parentId` Mutation)**: Updating `/subscriptions/{id}` to reassign `parentId`.
+10. **DD-10 (Practice Session Tampering)**: Updating `/practiceSessions/{id}` to inflate `score`.
+11. **DD-11 (Cross-Tenant Parent PII Read)**: Unrelated user reading another parent's `/parents/{id}` doc.
+12. **DD-12 (Public Child Leaderboard PII Injection / Spoof)**: Non-owner writing to `/childLeaderboard/{childId}` or injecting `email` ghost field.

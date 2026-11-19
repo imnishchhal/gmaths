@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
+import { formatIndianClassLabel } from '../../types/math';
 import {
   AgentProfile,
   ComputedSubscriptionState,
@@ -195,7 +196,7 @@ export const AdminDashboard: React.FC = () => {
           row.linkedChildren.some(
             (c) =>
               c.name.toLowerCase().includes(q) ||
-              c.username.toLowerCase().includes(q)
+              c.grade.toLowerCase().includes(q)
           )
         );
       });
@@ -296,7 +297,7 @@ export const AdminDashboard: React.FC = () => {
         return;
       }
       setFormSuccess(
-        `Created Agent ${res.agent?.name} (${res.agent?.agentCode}). They can now sign in at /agent.`
+        `Created Agent ${res.agent?.name} (${res.agent?.agentCode}). They can now sign in with Google (${res.agent?.email}) at /agent on any device.`
       );
     }
 
@@ -501,8 +502,8 @@ export const AdminDashboard: React.FC = () => {
                     {editingAgentId ? 'Edit Field Agent' : 'Create New Field Agent'}
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Agents sign in at /agent using their Agent ID, phone, or email
-                    plus passcode.
+                    Agents sign in at /agent using their registered Google Email
+                    for live desktop &amp; mobile Firestore sync.
                   </p>
                 </div>
                 <button
@@ -576,15 +577,16 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Email (optional)
+                    Google Email (for Sign-In) *
                   </label>
                   <input
                     type="email"
+                    required
                     value={agentForm.email}
                     onChange={(e) =>
                       setAgentForm((f) => ({ ...f, email: e.target.value }))
                     }
-                    placeholder="agent@example.com"
+                    placeholder="agent@gmail.com"
                     className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
@@ -766,6 +768,11 @@ export const AdminDashboard: React.FC = () => {
                             {agent.assignedArea}
                           </span>
                         </p>
+                        {agent.email && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {agent.email}
+                          </p>
+                        )}
                       </div>
 
                       <span
@@ -867,7 +874,7 @@ export const AdminDashboard: React.FC = () => {
                 type="search"
                 value={subQuery}
                 onChange={(e) => setSubQuery(e.target.value)}
-                placeholder="Search parent, child username, contact, or agent…"
+                placeholder="Search parent, child name, class, contact, or agent…"
                 className="w-full min-h-[44px] pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
@@ -991,7 +998,10 @@ export const AdminDashboard: React.FC = () => {
                         </span>
                         {row.linkedChildren.length > 0
                           ? row.linkedChildren
-                              .map((c) => `${c.name} (@${c.username})`)
+                              .map(
+                                (c) =>
+                                  `${c.name} (${formatIndianClassLabel(c.grade)})`
+                              )
                               .join(', ')
                           : 'None'}
                       </div>

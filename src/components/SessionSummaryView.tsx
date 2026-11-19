@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeft,
   Check,
   Cloud,
   HardDrive,
@@ -18,6 +19,8 @@ interface SessionSummaryViewProps {
   leaderboardUpdated: boolean;
   onPlayAgain: () => void;
   onBackToSetup: () => void;
+  onBackToParent?: () => void;
+  activeStudentLabel?: string;
 }
 
 type LogFilter = 'all' | 'missed' | 'slowest';
@@ -29,6 +32,8 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
   leaderboardUpdated,
   onPlayAgain,
   onBackToSetup,
+  onBackToParent,
+  activeStudentLabel,
 }) => {
   const { user, isConfigured, signInWithGoogle } = useFirebase();
   const [logFilter, setLogFilter] = useState<LogFilter>('all');
@@ -71,12 +76,18 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
       <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="space-y-1.5">
+            {activeStudentLabel && (
+              <p className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                {activeStudentLabel}
+              </p>
+            )}
             <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
               {formatSessionDescriptor(
                 session.mode,
                 session.difficulty,
                 session.sessionType,
-                session.durationSec
+                session.durationSec,
+                session.grade
               )}
             </p>
             <div className="flex flex-wrap items-baseline gap-4">
@@ -105,14 +116,25 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
               <RotateCcw className="w-4 h-4" />
               Play Again
             </button>
-            <button
-              type="button"
-              onClick={onBackToSetup}
-              className="flex-1 sm:flex-initial min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-              Change Setup
-            </button>
+            {onBackToParent ? (
+              <button
+                type="button"
+                onClick={onBackToParent}
+                className="flex-1 sm:flex-initial min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Parent Portal
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onBackToSetup}
+                className="flex-1 sm:flex-initial min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap shrink-0"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                Change Setup
+              </button>
+            )}
           </div>
         </div>
 

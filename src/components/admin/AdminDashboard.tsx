@@ -41,6 +41,7 @@ import {
   getAgentApprovalStatus,
   isSuspiciousSpeedRun,
 } from '../../types/platform';
+import { isPhoneAgentAuthEmail } from '../../utils/referral';
 
 type AdminTab = 'agents' | 'subscriptions' | 'payouts' | 'leaderboard';
 type SubFilter = 'all' | ComputedSubscriptionState;
@@ -433,7 +434,7 @@ export const AdminDashboard: React.FC = () => {
         return;
       }
       setFormSuccess(
-        `Created Agent ${res.agent?.name} (${res.agent?.agentCode}). They can now sign in with Google (${res.agent?.email}) at /agent on any device.`
+        `Created Agent ${res.agent?.name} (${res.agent?.agentCode}). They can now sign in at /agent using phone ${res.agent?.phone} and their password.`
       );
     }
 
@@ -700,8 +701,8 @@ export const AdminDashboard: React.FC = () => {
                     {editingAgentId ? 'Edit Field Agent' : 'Create New Field Agent'}
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Agents sign in at /agent using their registered Google Email
-                    for live desktop &amp; mobile Firestore sync.
+                    Agents sign in at /agent using their Mobile Phone Number and
+                    Password for live desktop &amp; mobile sync.
                   </p>
                 </div>
                 <button
@@ -759,7 +760,7 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Mobile Phone *
+                    Mobile Phone (Login ID) *
                   </label>
                   <input
                     type="tel"
@@ -773,21 +774,22 @@ export const AdminDashboard: React.FC = () => {
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Google Email (for Sign-In) *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={agentForm.email}
-                    onChange={(e) =>
-                      setAgentForm((f) => ({ ...f, email: e.target.value }))
-                    }
-                    placeholder="agent@gmail.com"
-                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
+                {editingAgentId && (
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Login Email / Identifier
+                    </label>
+                    <input
+                      type="email"
+                      value={agentForm.email}
+                      onChange={(e) =>
+                        setAgentForm((f) => ({ ...f, email: e.target.value }))
+                      }
+                      placeholder="Auto-generated from phone"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -918,27 +920,33 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 )}
 
-                <div className="space-y-1 sm:col-span-2 lg:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    {editingAgentId
-                      ? 'Reset Passcode (leave blank to keep current)'
-                      : 'Login Passcode / PIN *'}
-                  </label>
-                  <input
-                    type="text"
-                    required={!editingAgentId}
-                    value={agentForm.passcode}
-                    onChange={(e) =>
-                      setAgentForm((f) => ({ ...f, passcode: e.target.value }))
-                    }
-                    placeholder={
-                      editingAgentId
-                        ? 'Leave blank to keep existing passcode'
-                        : 'Set passcode for agent sign-in'
-                    }
-                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
+                {!editingAgentId ? (
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Login Password * (min 6 characters)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={6}
+                      value={agentForm.passcode}
+                      onChange={(e) =>
+                        setAgentForm((f) => ({ ...f, passcode: e.target.value }))
+                      }
+                      placeholder="Set initial password (min 6 chars) for /agent sign-in"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Password Management
+                    </label>
+                    <p className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 text-xs text-slate-600 dark:text-slate-400 flex items-center">
+                      Agents update their own login password inside the Agent Portal under Earnings &amp; Payouts → Settings.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
@@ -1071,10 +1079,20 @@ export const AdminDashboard: React.FC = () => {
                             {agent.city || agent.assignedArea || 'No city'}
                           </span>
                         </p>
-                        {(agent.email || agent.upiId) && (
+                        {((agent.email && !isPhoneAgentAuthEmail(agent.email)) ||
+                          agent.upiId) && (
                           <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                            {agent.email}
-                            {agent.upiId ? ` · UPI: ${agent.upiId}` : ''}
+                            {agent.email && !isPhoneAgentAuthEmail(agent.email)
+                              ? agent.email
+                              : ''}
+                            {agent.upiId
+                              ? `${
+                                  agent.email &&
+                                  !isPhoneAgentAuthEmail(agent.email)
+                                    ? ' · '
+                                    : ''
+                                }UPI: ${agent.upiId}`
+                              : ''}
                           </p>
                         )}
                       </div>

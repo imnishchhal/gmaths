@@ -7,13 +7,18 @@ import React, {
   useState,
 } from 'react';
 import {
+  createUserWithEmailAndPassword,
   getRedirectResult,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
   signOut,
+  updatePassword,
+  updateProfile,
   type User,
 } from 'firebase/auth';
+import { buildAgentAuthEmail } from '../utils/referral';
 import {
   auth,
   googleProvider,
@@ -90,6 +95,70 @@ function shouldFallbackToRedirect(err: unknown): boolean {
   );
 }
 
+export function formatPhoneAuthError(err: unknown): {
+  code: string;
+  message: string;
+} {
+  const code = extractAuthErrorCode(err);
+  if (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/wrong-password' ||
+    code === 'auth/user-not-found'
+  ) {
+    return {
+      code,
+      message: 'Incorrect phone number or password. Please check and try again.',
+    };
+  }
+  if (code === 'auth/email-already-in-use') {
+    return {
+      code,
+      message:
+        'An Agent login for this phone number already exists. Sign in with your phone number and password.',
+    };
+  }
+  if (code === 'auth/weak-password') {
+    return {
+      code,
+      message: 'Password must be at least 6 characters long.',
+    };
+  }
+  if (code === 'auth/too-many-requests') {
+    return {
+      code,
+      message: 'Too many failed attempts. Please wait a moment and try again.',
+    };
+  }
+  if (code === 'auth/network-request-failed') {
+    return {
+      code,
+      message: 'Network error while signing in. Check your connection and try again.',
+    };
+  }
+  if (code === 'auth/requires-recent-login') {
+    return {
+      code,
+      message:
+        'Please sign out and sign back in with your phone number and password before changing your password.',
+    };
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return {
+      code,
+      message:
+        'Phone & Password login requires Email/Password sign-in to be enabled in Firebase Console → Authentication → Sign-in method.',
+    };
+  }
+  const raw = err instanceof Error ? err.message : String(err);
+  return { code, message: raw || 'Unable to sign in with phone and password.' };
+}
+
+export interface PhoneAuthOutcome {
+  user: User | null;
+  code?: string;
+  error?: string;
+}
+
 interface RecordOutcome {
   savedToCloud: boolean;
   leaderboardUpdated: boolean;
@@ -115,6 +184,18 @@ interface FirebaseContextValue {
   personalBests: Record<string, SessionRecord>;
   signInWithGoogle: () => Promise<User | null>;
   signInWithGoogleRedirect: () => Promise<void>;
+  signInWithPhoneCredentials: (
+    phone: string,
+    password: string
+  ) => Promise<PhoneAuthOutcome>;
+  signUpWithPhoneCredentials: (
+    phone: string,
+    password: string,
+    displayName: string
+  ) => Promise<PhoneAuthOutcome>;
+  changeCurrentPassword: (
+    newPassword: string
+  ) => Promise<{ ok: boolean; code?: string; error?: string }>;
   signOutUser: () => Promise<void>;
   updateName: (nextName: string) => Promise<void>;
   recordCompletedSession: (session: SessionRecord) => Promise<RecordOutcome>;
@@ -389,6 +470,133 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const signInWithPhoneCredentials = useCallback(
+    async (phone: string, password: string): Promise<PhoneAuthOutcome> => {
+      if (!auth) {
+        return {
+          user: null,
+          error: 'Firebase Authentication is not configured.',
+        };
+      }
+      const authEmail = buildAgentAuthEmail(phone);
+      if (!authEmail) {
+        return {
+          user: null,
+          error: 'Enter a valid mobile phone number (at least 7 digits).',
+        };
+      }
+      if (!password || password.length < 4) {
+        return {
+          user: null,
+          error: 'Enter your agent password.',
+        };
+      }
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const credential = await signInWithEmailAndPassword(
+          auth,
+          authEmail,
+          password
+        );
+        setAuthLoading(false);
+        return { user: credential.user };
+      } catch (err) {
+        const formatted = formatPhoneAuthError(err);
+        setAuthLoading(false);
+        return {
+          user: null,
+          code: formatted.code,
+          error: formatted.message,
+        };
+      }
+    },
+    []
+  );
+
+  const signUpWithPhoneCredentials = useCallback(
+    async (
+      phone: string,
+      password: string,
+      nextDisplayName: string
+    ): Promise<PhoneAuthOutcome> => {
+      if (!auth) {
+        return {
+          user: null,
+          error: 'Firebase Authentication is not configured.',
+        };
+      }
+      const authEmail = buildAgentAuthEmail(phone);
+      if (!authEmail) {
+        return {
+          user: null,
+          error: 'Enter a valid mobile phone number (at least 7 digits).',
+        };
+      }
+      if (password.length < 6) {
+        return {
+          user: null,
+          error: 'Password must be at least 6 characters long.',
+        };
+      }
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          authEmail,
+          password
+        );
+        const cleanName = sanitizeDisplayName(nextDisplayName || 'Partner');
+        await updateProfile(credential.user, { displayName: cleanName }).catch(
+          () => {}
+        );
+        setAuthLoading(false);
+        return { user: credential.user };
+      } catch (err) {
+        const formatted = formatPhoneAuthError(err);
+        setAuthLoading(false);
+        return {
+          user: null,
+          code: formatted.code,
+          error: formatted.message,
+        };
+      }
+    },
+    []
+  );
+
+  const changeCurrentPassword = useCallback(
+    async (
+      newPassword: string
+    ): Promise<{ ok: boolean; code?: string; error?: string }> => {
+      if (!auth || !auth.currentUser) {
+        return {
+          ok: false,
+          error: 'Sign in with your phone number and password first.',
+        };
+      }
+      if (newPassword.length < 6) {
+        return {
+          ok: false,
+          error: 'New password must be at least 6 characters long.',
+        };
+      }
+      try {
+        await updatePassword(auth.currentUser, newPassword);
+        return { ok: true };
+      } catch (err) {
+        const formatted = formatPhoneAuthError(err);
+        return {
+          ok: false,
+          code: formatted.code,
+          error: formatted.message,
+        };
+      }
+    },
+    []
+  );
+
   const signOutUser = useCallback(async () => {
     if (!auth) return;
     setAuthError(null);
@@ -512,6 +720,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       personalBests,
       signInWithGoogle,
       signInWithGoogleRedirect,
+      signInWithPhoneCredentials,
+      signUpWithPhoneCredentials,
+      changeCurrentPassword,
       signOutUser,
       updateName,
       recordCompletedSession,
@@ -537,6 +748,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       personalBests,
       signInWithGoogle,
       signInWithGoogleRedirect,
+      signInWithPhoneCredentials,
+      signUpWithPhoneCredentials,
+      changeCurrentPassword,
       signOutUser,
       updateName,
       recordCompletedSession,

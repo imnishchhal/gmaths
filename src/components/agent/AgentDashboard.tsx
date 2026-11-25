@@ -8,7 +8,10 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  Eye,
+  EyeOff,
   IndianRupee,
+  Lock,
   LogOut,
   MessageCircle,
   Plus,
@@ -71,6 +74,7 @@ export const AgentDashboard: React.FC = () => {
     addChildToParent,
     renewParentSubscription,
     updateAgentSelfProfile,
+    changeAgentPassword,
     requestAgentPayout,
   } = usePlatform();
 
@@ -95,6 +99,12 @@ export const AgentDashboard: React.FC = () => {
   );
   const [profileUpi, setProfileUpi] = useState(agent?.upiId ?? '');
   const [savingProfile, setSavingProfile] = useState(false);
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   // Onboard Parent + Children + Fee Form State
   const [parentName, setParentName] = useState('');
@@ -325,6 +335,30 @@ export const AgentDashboard: React.FC = () => {
       setNotice('Partner profile and payout UPI ID updated.');
       setTimeout(() => setNotice(null), 4000);
     }
+  };
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setSavingPassword(true);
+    const res = await changeAgentPassword(agent.id, newPassword);
+    setSavingPassword(false);
+    if (!res.ok) {
+      setPasswordError(res.error || 'Could not update login password.');
+      return;
+    }
+    setNewPassword('');
+    setConfirmPassword('');
+    setNotice('Your login password has been updated.');
+    setTimeout(() => setNotice(null), 4000);
   };
 
   const handleUpdateChildRow = (
@@ -1278,14 +1312,14 @@ export const AgentDashboard: React.FC = () => {
                 </div>
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Phone Number
+                    Phone Number (Login ID)
                   </label>
                   <input
                     type="tel"
-                    required
-                    value={profilePhone}
-                    onChange={(e) => setProfilePhone(e.target.value)}
-                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                    readOnly
+                    disabled
+                    value={agent.phone}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/60 text-sm font-mono text-slate-600 dark:text-slate-400 cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1325,6 +1359,82 @@ export const AgentDashboard: React.FC = () => {
                 {savingProfile ? 'Saving…' : 'Save Partner Profile'}
               </button>
             </form>
+
+            {/* Change Login Password */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Update Login Password
+                </h3>
+              </div>
+
+              {passwordError && (
+                <div className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3 py-2 flex items-center gap-2 text-xs text-red-700 dark:text-red-300">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleChangePasswordSubmit} className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      New Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Min 6 characters"
+                        className="w-full min-h-[44px] pl-3 pr-11 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((v) => !v)}
+                        aria-label={
+                          showNewPassword ? 'Hide password' : 'Show password'
+                        }
+                        className="absolute right-0.5 top-0 min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                      >
+                        {showNewPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Confirm Password *
+                    </label>
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingPassword}
+                  className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200"
+                >
+                  {savingPassword ? 'Updating…' : 'Update Password'}
+                </button>
+              </form>
+            </div>
           </section>
         </div>
       )}

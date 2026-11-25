@@ -50,6 +50,7 @@ import {
   getAgentApprovalStatus,
 } from './types/platform';
 import { soundEngine } from './utils/sound';
+import { isPhoneAgentAuthEmail } from './utils/referral';
 
 const CONFIG_STORAGE_KEY = 'math_speedster_config_v2';
 const THEME_STORAGE_KEY = 'math_speedster_theme_v1';
@@ -164,9 +165,13 @@ const MathSpeedsterShell: React.FC = () => {
     leaderboardUpdated: boolean;
   } | null>(null);
 
-  // Record referred trial signup if signed in with a captured ?ref= code
+  // Record referred trial signup if signed in with a captured ?ref= code (students/parents only)
   useEffect(() => {
-    if (user?.email && capturedReferralCode) {
+    if (
+      user?.email &&
+      capturedReferralCode &&
+      !isPhoneAgentAuthEmail(user.email)
+    ) {
       void recordTrialLeadIfReferred(user.displayName || '', user.email);
     }
   }, [

@@ -1,7 +1,9 @@
-import { initializeApp, type FirebaseApp } from 'firebase/app';
+import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
+  createUserWithEmailAndPassword,
   getAuth,
   GoogleAuthProvider,
+  signOut,
   type Auth,
 } from 'firebase/auth';
 import {
@@ -91,6 +93,31 @@ if (hasValidConfig(firebaseConfig)) {
 export const isFirebaseConfigured = firebaseReady;
 
 export { app, db, auth, googleProvider, firebaseConfig };
+
+/**
+ * Creates a Firebase Email/Password auth user in an isolated secondary app instance
+ * so an active Admin Google session is never signed out when provisioning an Agent.
+ */
+export async function provisionAgentAuthAccount(
+  authEmail: string,
+  password: string
+): Promise<string | null> {
+  if (!firebaseReady || !hasValidConfig(firebaseConfig)) return null;
+  const secondaryApp =
+    getApps().find((item) => item.name === 'agent_provisioner') ??
+    initializeApp(firebaseConfig, 'agent_provisioner');
+  const secondaryAuth = getAuth(secondaryApp);
+  try {
+    const credential = await createUserWithEmailAndPassword(
+      secondaryAuth,
+      authEmail,
+      password
+    );
+    return credential.user.uid;
+  } finally {
+    await signOut(secondaryAuth).catch(() => {});
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',

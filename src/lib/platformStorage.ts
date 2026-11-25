@@ -51,6 +51,7 @@ import {
 } from '../types/math';
 import {
   hashContactForAttribution,
+  isPhoneAgentAuthEmail,
   normalizeEmailForMatch,
   normalizePhoneForMatch,
 } from '../utils/referral';
@@ -407,6 +408,13 @@ export interface ResolvedFirestoreRole {
   inactiveAgent?: boolean;
 }
 
+function isTrustedEmailIdentity(user: User, emailLower: string): boolean {
+  return Boolean(
+    emailLower.length >= 3 &&
+      (user.emailVerified || isPhoneAgentAuthEmail(emailLower))
+  );
+}
+
 export async function resolveUserRoleFromFirestore(
   user: User
 ): Promise<ResolvedFirestoreRole> {
@@ -415,7 +423,7 @@ export async function resolveUserRoleFromFirestore(
 
   const emailLower = sanitizeEmail(user.email ?? '');
 
-  // 1. Bootstrapped Platform Admin
+  // 1. Bootstrapped Platform Admin (strictly requires verified Google email)
   if (user.emailVerified && emailLower === BOOTSTRAPPED_ADMIN_EMAIL) {
     return {
       session: {
@@ -427,28 +435,30 @@ export async function resolveUserRoleFromFirestore(
     };
   }
 
-  // 2. Explicit /admins/{uid} doc
-  try {
-    const adminSnap = await getDoc(doc(firestore, 'admins', user.uid));
-    if (adminSnap.exists()) {
-      return {
-        session: {
-          role: 'admin',
-          accountId: user.uid,
-          displayName: user.displayName || 'Platform Admin',
-        },
-        route: '/admin',
-      };
+  // 2. Explicit /admins/{uid} doc (strictly requires verified Google email)
+  if (user.emailVerified) {
+    try {
+      const adminSnap = await getDoc(doc(firestore, 'admins', user.uid));
+      if (adminSnap.exists()) {
+        return {
+          session: {
+            role: 'admin',
+            accountId: user.uid,
+            displayName: user.displayName || 'Platform Admin',
+          },
+          route: '/admin',
+        };
+      }
+    } catch {
+      // Not an admin or unverified email — continue checking agent/parent
     }
-  } catch {
-    // Not an admin or unverified email — continue checking agent/parent
   }
 
-  if (!user.emailVerified || !emailLower) {
+  if (!isTrustedEmailIdentity(user, emailLower)) {
     return { session: null, route: '/' };
   }
 
-  // 3. Field / Sales Agent matched by verified Google email (approved or pending)
+  // 3. Field / Sales Agent matched by verified Google email or phone-auth identity
   try {
     const agentSnap = await getDocs(
       query(collection(firestore, 'agents'), where('email', '==', emailLower), limit(5))
@@ -532,6 +542,7 @@ export function subscribePlatformWorkspace(
   const emailLower = sanitizeEmail(user.email ?? '');
   const isBootstrappedAdmin =
     Boolean(user.emailVerified) && emailLower === BOOTSTRAPPED_ADMIN_EMAIL;
+  const trustedIdentity = isTrustedEmailIdentity(user, emailLower);
 
   let settledCollections = 0;
   const markCollectionSettled = () => {
@@ -564,7 +575,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(user.emailVerified && emailLower.length >= 3
+          ...(trustedIdentity
             ? [
                 {
                   key: 'email',
@@ -602,7 +613,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(user.emailVerified && emailLower.length >= 3
+          ...(trustedIdentity
             ? [
                 {
                   key: 'agentEmail',
@@ -651,7 +662,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(user.emailVerified && emailLower.length >= 3
+          ...(trustedIdentity
             ? [
                 {
                   key: 'agentEmail',
@@ -698,7 +709,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(user.emailVerified && emailLower.length >= 3
+          ...(trustedIdentity
             ? [
                 {
                   key: 'agentEmail',
@@ -736,7 +747,7 @@ export function subscribePlatformWorkspace(
               limit(100)
             ),
           },
-          ...(user.emailVerified && emailLower.length >= 3
+          ...(trustedIdentity
             ? [
                 {
                   key: 'subEmail',
@@ -773,7 +784,7 @@ export function subscribePlatformWorkspace(
             ),
           },
         ]
-      : user.emailVerified && emailLower.length >= 3
+      : trustedIdentity
       ? [
           {
             key: 'agentEmail',
@@ -997,13 +1008,13 @@ export async function cloudCreateAgent(
   const path = `agents/${id}`;
   const email = sanitizeEmail(agent.email);
   if (email.length < 3) {
-    throw new Error('Agent email is required for cross-device Google Sign-In.');
+    throw new Error('Agent login identifier is required for cross-device sync.');
   }
   const approvalStatus = getAgentApprovalStatus(agent);
   const payload: Record<string, unknown> = {
     id,
     workspaceId: WORKSPACE_ID,
-    ownerUid: sanitizeId(user.uid, 'u'),
+    ownerUid: sanitizeId(agent.ownerUid || user.uid, 'u'),
     agentCode: sanitizeCode(agent.agentCode, id.slice(0, 12)),
     name: (agent.name.trim() || 'Agent').slice(0, 80),
     phone: (agent.phone.trim() || '000').slice(0, 40),
@@ -1086,6 +1097,24 @@ export async function cloudUpdateAgentSelfProfile(
       city: patch.city.trim().slice(0, 80),
       assignedArea: (patch.city.trim() || agent.assignedArea).slice(0, 80),
       upiId: patch.upiId.trim().slice(0, 100),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function cloudUpdateAgentPasswordHash(
+  agentId: string,
+  passcodeHash: string
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(agentId, 'ag');
+  const path = `agents/${id}`;
+  try {
+    await updateDoc(doc(firestore, 'agents', id), {
+      passcodeHash: sanitizeHash(passcodeHash),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

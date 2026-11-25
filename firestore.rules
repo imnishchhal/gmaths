@@ -21,6 +21,17 @@ service cloud.firestore {
         && request.auth.token.email.size() >= 3;
     }
 
+    function isPhoneAgentAuth() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^agent\\.[0-9]{7,15}@gmaths\\.local$')
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+
+    function isAuthorizedAppUser() {
+      return isVerifiedUser() || isPhoneAgentAuth();
+    }
+
     function userEmailLower() {
       return request.auth.token.email.lower();
     }
@@ -40,7 +51,7 @@ service cloud.firestore {
     }
 
     function isAgentRecordAuthorized(data) {
-      return isVerifiedUser() && (
+      return isAuthorizedAppUser() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
         || (data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
@@ -48,7 +59,7 @@ service cloud.firestore {
     }
 
     function isParentRecordAuthorized(data) {
-      return isVerifiedUser() && (
+      return isAuthorizedAppUser() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
         || (data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
@@ -57,7 +68,7 @@ service cloud.firestore {
     }
 
     function isFamilyScopedAuthorized(data) {
-      return isVerifiedUser() && (
+      return isAuthorizedAppUser() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
         || (data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
@@ -541,14 +552,14 @@ service cloud.firestore {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false;
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isOwner(userId)
         && isValidId(userId)
         && isValidUserProfile(incoming(), userId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(userId)
         && isValidUserProfile(incoming(), userId)
         && isOwner(userId)
@@ -557,7 +568,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'updatedAt']);
 
-      allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId);
+      allow delete: if isAuthorizedAppUser() && isOwner(userId) && isValidId(userId);
 
       // -----------------------------------------------------------------------
       // Collection 2: /users/{userId}/sessions/{sessionId}
@@ -569,7 +580,7 @@ service cloud.firestore {
           && request.auth.uid == userId
           && resource.data.userId == request.auth.uid;
 
-        allow create: if isVerifiedUser()
+        allow create: if isAuthorizedAppUser()
           && isOwner(userId)
           && isValidId(userId)
           && isValidId(sessionId)
@@ -579,7 +590,7 @@ service cloud.firestore {
 
         allow update: if false;
 
-        allow delete: if isVerifiedUser()
+        allow delete: if isAuthorizedAppUser()
           && isOwner(userId)
           && isValidId(userId)
           && isValidId(sessionId);
@@ -597,7 +608,7 @@ service cloud.firestore {
       allow list: if isSignedIn()
         && resource.data.isPublic == true;
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(entryId)
         && isValidLeaderboardEntry(incoming(), entryId)
         && incoming().userId == request.auth.uid
@@ -606,7 +617,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && exists(/databases/$(database)/documents/users/$(request.auth.uid));
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(entryId)
         && isValidLeaderboardEntry(incoming(), entryId)
         && incoming().id == existing().id
@@ -648,7 +659,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(entryId)
         && (isAdmin() || existing().userId == request.auth.uid);
     }
@@ -671,14 +682,14 @@ service cloud.firestore {
     // Collection 5: /agents/{agentId} — Field & Sales Agents
     // -------------------------------------------------------------------------
     match /agents/{agentId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(agentId)
         && (resource == null || isAgentRecordAuthorized(existing()));
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && isAgentRecordAuthorized(resource.data);
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
         && incoming().createdAt == request.time
@@ -696,7 +707,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
         && isAgentRecordAuthorized(existing())
@@ -712,7 +723,7 @@ service cloud.firestore {
           ])
         );
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(agentId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
@@ -724,7 +735,7 @@ service cloud.firestore {
       allow get: if isValidId(code);
       allow list: if isAdmin();
 
-      allow create, update: if isVerifiedUser()
+      allow create, update: if isAuthorizedAppUser()
         && isValidId(code)
         && isValidReferralCodePublic(incoming(), code)
         && incoming().updatedAt == request.time
@@ -734,6 +745,7 @@ service cloud.firestore {
             exists(/databases/$(database)/documents/agents/$(incoming().agentId))
             && isAgentRecordAuthorized(get(/databases/$(database)/documents/agents/$(incoming().agentId)).data)
             && incoming().isActive == get(/databases/$(database)/documents/agents/$(incoming().agentId)).data.isActive
+            && incoming().approvalStatus == get(/databases/$(database)/documents/agents/$(incoming().agentId)).data.approvalStatus
           )
         );
 
@@ -744,14 +756,14 @@ service cloud.firestore {
     // Collection 6: /parents/{parentId} — Onboarded Parent Accounts
     // -------------------------------------------------------------------------
     match /parents/{parentId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(parentId)
         && (resource == null || isParentRecordAuthorized(existing()));
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && isParentRecordAuthorized(resource.data);
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(parentId)
         && isValidParentProfile(incoming(), parentId)
         && (incoming().ownerUid == request.auth.uid || isAdmin())
@@ -763,7 +775,7 @@ service cloud.firestore {
           || isAgentRecordAuthorized(get(/databases/$(database)/documents/agents/$(incoming().createdByAgentId)).data)
         );
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(parentId)
         && isValidParentProfile(incoming(), parentId)
         && isParentRecordAuthorized(existing())
@@ -781,7 +793,7 @@ service cloud.firestore {
           ])
         );
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(parentId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
@@ -790,14 +802,14 @@ service cloud.firestore {
     // Collection 7: /children/{childId} — Credential-Free Linked Child Profiles
     // -------------------------------------------------------------------------
     match /children/{childId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(childId)
         && (resource == null || isFamilyScopedAuthorized(existing()));
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && isFamilyScopedAuthorized(resource.data);
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(childId)
         && isValidChildProfile(incoming(), childId)
         && (incoming().ownerUid == request.auth.uid || isAdmin())
@@ -809,7 +821,7 @@ service cloud.firestore {
           || isParentRecordAuthorized(get(/databases/$(database)/documents/parents/$(incoming().parentId)).data)
         );
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(childId)
         && isValidChildProfile(incoming(), childId)
         && isFamilyScopedAuthorized(existing())
@@ -827,7 +839,7 @@ service cloud.firestore {
           ])
         );
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(childId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
@@ -841,7 +853,7 @@ service cloud.firestore {
 
       allow list: if resource.data.totalScore >= 1;
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(childId)
         && isValidChildLeaderboardEntry(incoming(), childId)
         && (!('isHidden' in incoming()) || incoming().isHidden == false)
@@ -850,7 +862,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/children/$(childId))
         && (isAdmin() || isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data));
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(childId)
         && isValidChildLeaderboardEntry(incoming(), childId)
         && incoming().id == existing().id
@@ -874,7 +886,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(childId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
@@ -883,14 +895,14 @@ service cloud.firestore {
     // Collection 9: /subscriptions/{subscriptionId} — Yearly Parent Ledger
     // -------------------------------------------------------------------------
     match /subscriptions/{subscriptionId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(subscriptionId)
         && (resource == null || isFamilyScopedAuthorized(existing()));
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && isFamilyScopedAuthorized(resource.data);
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(subscriptionId)
         && isValidSubscriptionRecord(incoming(), subscriptionId)
         && (incoming().ownerUid == request.auth.uid || isAdmin())
@@ -906,7 +918,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(subscriptionId)
         && isValidSubscriptionRecord(incoming(), subscriptionId)
         && isFamilyScopedAuthorized(existing())
@@ -925,7 +937,7 @@ service cloud.firestore {
           ])
         );
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(subscriptionId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
@@ -934,7 +946,7 @@ service cloud.firestore {
     // Collection 10: /leads/{leadId} — Trial Signups & Agent Follow-ups
     // -------------------------------------------------------------------------
     match /leads/{leadId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(leadId)
         && (
           resource == null
@@ -943,14 +955,14 @@ service cloud.firestore {
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && (
           isAdmin()
           || resource.data.ownerUid == request.auth.uid
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(leadId)
         && isValidTrialLead(incoming(), leadId)
         && (incoming().ownerUid == request.auth.uid || isAdmin())
@@ -958,7 +970,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && exists(/databases/$(database)/documents/agents/$(incoming().agentId));
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(leadId)
         && isValidTrialLead(incoming(), leadId)
         && (
@@ -984,7 +996,7 @@ service cloud.firestore {
     // Collection 11: /studentSubscriptions/{subscriptionId} — Annual Pro Plans
     // -------------------------------------------------------------------------
     match /studentSubscriptions/{subscriptionId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(subscriptionId)
         && (
           resource == null
@@ -994,7 +1006,7 @@ service cloud.firestore {
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && (
           isAdmin()
           || resource.data.ownerUid == request.auth.uid
@@ -1002,7 +1014,7 @@ service cloud.firestore {
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(subscriptionId)
         && isValidStudentSubscription(incoming(), subscriptionId)
         && (incoming().ownerUid == request.auth.uid || isAdmin())
@@ -1039,7 +1051,7 @@ service cloud.firestore {
     // Collection 12: /payoutRequests/{payoutId} — Agent UPI Withdrawals
     // -------------------------------------------------------------------------
     match /payoutRequests/{payoutId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(payoutId)
         && (
           resource == null
@@ -1048,14 +1060,14 @@ service cloud.firestore {
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && (
           isAdmin()
           || resource.data.ownerUid == request.auth.uid
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(payoutId)
         && isValidPayoutRequest(incoming(), payoutId)
         && incoming().status == 'pending'
@@ -1092,9 +1104,9 @@ service cloud.firestore {
     // Collection 13: /vouchers/{voucherId} — Single-Use Offline Cash Vouchers
     // -------------------------------------------------------------------------
     match /vouchers/{voucherId} {
-      allow get: if isVerifiedUser() && isValidId(voucherId);
+      allow get: if isAuthorizedAppUser() && isValidId(voucherId);
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && (
           isAdmin()
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
@@ -1109,7 +1121,7 @@ service cloud.firestore {
         && incoming().redeemedAt == ''
         && incoming().createdAt == request.time;
 
-      allow update: if isVerifiedUser()
+      allow update: if isAuthorizedAppUser()
         && isValidId(voucherId)
         && isValidOfflineVoucher(incoming(), voucherId)
         && existing().status == 'unused'
@@ -1151,14 +1163,14 @@ service cloud.firestore {
     // Collection 15: /practiceSessions/{sessionId} — Child Practice Sessions
     // -------------------------------------------------------------------------
     match /practiceSessions/{sessionId} {
-      allow get: if isVerifiedUser()
+      allow get: if isAuthorizedAppUser()
         && isValidId(sessionId)
         && (resource == null || isFamilyScopedAuthorized(existing()));
 
-      allow list: if isVerifiedUser()
+      allow list: if isAuthorizedAppUser()
         && isFamilyScopedAuthorized(resource.data);
 
-      allow create: if isVerifiedUser()
+      allow create: if isAuthorizedAppUser()
         && isValidId(sessionId)
         && isValidPracticeSession(incoming(), sessionId)
         && isFamilyScopedAuthorized(incoming())
@@ -1173,7 +1185,7 @@ service cloud.firestore {
       // Immutable historical practice log
       allow update: if false;
 
-      allow delete: if isVerifiedUser()
+      allow delete: if isAuthorizedAppUser()
         && isValidId(sessionId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }

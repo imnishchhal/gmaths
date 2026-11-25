@@ -4,6 +4,7 @@ type AuthContext = {
   uid: string;
   email: string;
   email_verified: boolean;
+  sign_in_provider?: 'google.com' | 'password';
 } | null;
 
 const INDIAN_CLASSES = new Set([
@@ -55,6 +56,26 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       defaultYearlyFee: 1200,
       passcodeHash: 'p'.repeat(64),
       isActive: false,
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+    ag_phone: {
+      id: 'ag_phone',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'phone_ag_uid',
+      agentCode: 'PH01',
+      name: 'Phone Agent',
+      phone: '9876501234',
+      email: 'agent.9876501234@gmaths.local',
+      assignedArea: 'Jaipur',
+      city: 'Jaipur',
+      upiId: 'phone@upi',
+      approvalStatus: 'approved',
+      commissionRate: 15,
+      commissionPerConversion: 300,
+      defaultYearlyFee: 1200,
+      passcodeHash: 'x'.repeat(64),
+      isActive: true,
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
     },
@@ -242,6 +263,14 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
 };
 
 const isVerified = (auth: AuthContext) => Boolean(auth && auth.email_verified);
+const isPhoneAgentAuth = (auth: AuthContext) =>
+  Boolean(
+    auth &&
+      /^agent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
+      auth.sign_in_provider === 'password'
+  );
+const isAuthorizedAppUser = (auth: AuthContext) =>
+  isVerified(auth) || isPhoneAgentAuth(auth);
 const isBootstrappedAdmin = (auth: AuthContext) =>
   isVerified(auth) && auth!.email.toLowerCase() === BOOTSTRAPPED_ADMIN;
 const isValidId = (id: unknown) =>
@@ -262,7 +291,7 @@ function hasAllowedKeys(
 }
 
 function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
-  if (!isVerified(auth)) return false;
+  if (!isAuthorizedAppUser(auth)) return false;
   const email = auth!.email.toLowerCase();
   return (
     data.ownerUid === auth!.uid ||
@@ -272,7 +301,7 @@ function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): bo
 }
 
 function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
-  if (!isVerified(auth)) return false;
+  if (!isAuthorizedAppUser(auth)) return false;
   const email = auth!.email.toLowerCase();
   return (
     data.ownerUid === auth!.uid ||
@@ -297,7 +326,7 @@ function evaluateRule(
 
   if (col === 'agents') {
     if (op === 'get') {
-      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
       return isAgentAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
     }
@@ -312,7 +341,7 @@ function evaluateRule(
         'city', 'upiId', 'approvalStatus', 'commissionPerConversion',
       ];
       const validBase =
-        isVerified(auth) &&
+        isAuthorizedAppUser(auth) &&
         isValidId(docId) &&
         hasAllowedKeys(incoming, req, allowed) &&
         incoming.id === docId &&
@@ -336,7 +365,7 @@ function evaluateRule(
 
   if (col === 'parents') {
     if (op === 'get') {
-      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
       const email = auth!.email.toLowerCase();
       const ok =
@@ -348,7 +377,7 @@ function evaluateRule(
     }
     if (op === 'create' && incoming) {
       const agentId = String(incoming.createdByAgentId ?? '');
-      const ok = isVerified(auth) && isValidId(docId) && Boolean(dbState.agents[agentId]);
+      const ok = isAuthorizedAppUser(auth) && isValidId(docId) && Boolean(dbState.agents[agentId]);
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
@@ -468,7 +497,7 @@ function evaluateRule(
 
   if (col === 'payoutRequests') {
     if (op === 'get') {
-      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
       const email = auth!.email.toLowerCase();
       const ok =
@@ -478,7 +507,7 @@ function evaluateRule(
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
     if (op === 'create' && incoming) {
-      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       const agentDoc = dbState.agents[String(incoming.agentId ?? '')];
       if (!agentDoc) return 'PERMISSION_DENIED';
       const ok =
@@ -791,6 +820,90 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
         redeemedByEmail: 'student2@example.com',
         redeemedAt: '2026-02-02',
       }),
+  },
+  {
+    name: 'DD-20 Password Provider Admin Email Spoof Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'spoof', email: BOOTSTRAPPED_ADMIN, email_verified: false, sign_in_provider: 'password' },
+        'agents',
+        'get',
+        'ag_1'
+      ),
+  },
+  {
+    name: 'DD-21 Phone Agent Cannot Read Another Agent Profile',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'phone_ag_uid', email: 'agent.9876501234@gmaths.local', email_verified: false, sign_in_provider: 'password' },
+        'agents',
+        'get',
+        'ag_1'
+      ),
+  },
+  {
+    name: 'DD-22 Phone Agent Self-Approval Escalation Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'new_phone_uid', email: 'agent.9988776655@gmaths.local', email_verified: false, sign_in_provider: 'password' },
+        'agents',
+        'create',
+        'ag_phone_bad',
+        {
+          ...dbState.agents.ag_phone,
+          id: 'ag_phone_bad',
+          ownerUid: 'new_phone_uid',
+          email: 'agent.9988776655@gmaths.local',
+          approvalStatus: 'approved',
+          isActive: true,
+        }
+      ),
+  },
+  {
+    name: 'VALID-08 Phone+Password Agent Reads Own Profile & Requests Payout',
+    expected: 'ALLOW',
+    run: () => {
+      const auth = {
+        uid: 'phone_ag_uid',
+        email: 'agent.9876501234@gmaths.local',
+        email_verified: false,
+        sign_in_provider: 'password' as const,
+      };
+      const readRes = evaluateRule(auth, 'agents', 'get', 'ag_phone');
+      const payoutRes = evaluateRule(auth, 'payoutRequests', 'create', 'pay_phone', {
+        ...dbState.payoutRequests.pay_1,
+        id: 'pay_phone',
+        ownerUid: 'phone_ag_uid',
+        agentId: 'ag_phone',
+        agentEmail: 'agent.9876501234@gmaths.local',
+      });
+      return readRes === 'ALLOW' && payoutRes === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
+    },
+  },
+  {
+    name: 'VALID-09 Phone+Password Agent Self-Signup Strictly Pending',
+    expected: 'ALLOW',
+    run: () =>
+      evaluateRule(
+        { uid: 'new_phone_uid', email: 'agent.9988776655@gmaths.local', email_verified: false, sign_in_provider: 'password' },
+        'agents',
+        'create',
+        'ag_phone_new',
+        {
+          ...dbState.agents.ag_pending,
+          id: 'ag_phone_new',
+          ownerUid: 'new_phone_uid',
+          email: 'agent.9988776655@gmaths.local',
+          phone: '9988776655',
+          approvalStatus: 'pending',
+          isActive: false,
+          commissionRate: 0,
+          commissionPerConversion: 0,
+        }
+      ),
   },
 ];
 

@@ -6,7 +6,8 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { useFirebase } from './FirebaseContext';
+import { formatPhoneAuthError, useFirebase } from './FirebaseContext';
+import { provisionAgentAuthAccount } from '../lib/firebase';
 import {
   cloudCreateAgent,
   cloudCreateChild,
@@ -21,6 +22,7 @@ import {
   cloudMarkPayoutPaid,
   cloudSaveAppConfig,
   cloudUpdateAgent,
+  cloudUpdateAgentPasswordHash,
   cloudUpdateAgentSelfProfile,
   cloudUpdateChildLeaderboardVisibility,
   cloudUpdateChildScoreAndLeaderboard,
@@ -86,10 +88,13 @@ import {
 } from '../types/math';
 import { hashSecret, verifySecret } from '../utils/crypto';
 import {
+  buildAgentAuthEmail,
   captureReferralFromCurrentUrl,
   hashContactForAttribution,
+  isPhoneAgentAuthEmail,
   loadStickyReferral,
   normalizeEmailForMatch,
+  normalizePhoneDigits,
   normalizePhoneForMatch,
   saveStickyReferral,
 } from '../utils/referral';
@@ -234,9 +239,13 @@ interface PlatformContextValue {
     phone?: string
   ) => Promise<void>;
 
-  // Role Authentication (Google-first + Cloud Firestore verified)
+  // Role Authentication (Phone+Password for Agents, Google for Admin/Parent)
   signInAndRouteWithGoogle: () => Promise<{ ok: boolean; error?: string }>;
   signInWithGoogleRedirectFlow: () => Promise<void>;
+  loginAgentPhonePassword: (
+    phone: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   loginAgentPasscode: (
     identifier: string,
     passcode: string
@@ -248,6 +257,7 @@ interface PlatformContextValue {
   registerSalesAgent: (input: {
     name: string;
     phone: string;
+    password: string;
     city: string;
     upiId: string;
     agentCode?: string;
@@ -255,6 +265,10 @@ interface PlatformContextValue {
   updateAgentSelfProfile: (
     agentId: string,
     patch: { name: string; phone: string; city: string; upiId: string }
+  ) => Promise<{ ok: boolean; error?: string }>;
+  changeAgentPassword: (
+    agentId: string,
+    newPassword: string
   ) => Promise<{ ok: boolean; error?: string }>;
   requestAgentPayout: (
     agentId: string,
@@ -390,6 +404,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     googleSignInSeq,
     signInWithGoogle,
     signInWithGoogleRedirect,
+    signInWithPhoneCredentials,
+    signUpWithPhoneCredentials,
+    changeCurrentPassword,
     signOutUser,
   } = useFirebase();
 
@@ -1214,6 +1231,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   const recordTrialLeadIfReferred = useCallback(
     async (name: string, email: string, phone = '') => {
       if (!capturedReferralCode || !user) return;
+      if (isPhoneAgentAuthEmail(user.email)) return;
       const emailLower = normalizeEmailForMatch(email || user.email || '');
       if (!emailLower) return;
 
@@ -1309,26 +1327,33 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     async (input: {
       name: string;
       phone: string;
+      password: string;
       city: string;
       upiId: string;
       agentCode?: string;
     }) => {
-      if (!user) {
-        return {
-          ok: false,
-          error: 'Sign in with Google first to submit your Sales Partner profile.',
-        };
-      }
       const nameClean = input.name.trim();
-      const phoneClean = input.phone.trim();
+      const phoneDigits = normalizePhoneDigits(input.phone);
+      const password = input.password;
       const cityClean = input.city.trim();
       const upiClean = input.upiId.trim();
-      const emailClean = normalizeEmailForMatch(user.email || '');
 
-      if (!nameClean || !phoneClean || !cityClean || !upiClean) {
+      if (!nameClean || !cityClean || !upiClean) {
         return {
           ok: false,
           error: 'Name, Phone, City, and UPI ID are all required.',
+        };
+      }
+      if (phoneDigits.length < 7) {
+        return {
+          ok: false,
+          error: 'Enter a valid mobile phone number (at least 7 digits).',
+        };
+      }
+      if (password.length < 6) {
+        return {
+          ok: false,
+          error: 'Password must be at least 6 characters long.',
         };
       }
       if (!upiClean.includes('@')) {
@@ -1338,14 +1363,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
 
-      const existingOwn = agents.find((a) => a.email === emailClean);
-      if (existingOwn) {
-        updateRoleSession({
-          role: 'agent',
-          accountId: existingOwn.id,
-          displayName: existingOwn.name,
-        });
-        return { ok: true, agent: existingOwn };
+      const authEmail = buildAgentAuthEmail(phoneDigits);
+      const duplicateLocal = agents.find(
+        (a) =>
+          normalizePhoneDigits(a.phone) === phoneDigits ||
+          a.email.toLowerCase() === authEmail
+      );
+      if (duplicateLocal) {
+        return {
+          ok: false,
+          error:
+            'An Agent profile with this phone number already exists. Sign in with your phone number and password.',
+        };
       }
 
       const baseSlug = nameClean
@@ -1362,15 +1391,63 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         `${baseSlug}${Math.floor(100 + Math.random() * 900)}`;
 
       const now = Date.now();
-      const passcodeHash = await hashSecret(`google_oauth_${user.uid}`);
+      const passcodeHash = await hashSecret(password);
+
+      if (!isConfigured) {
+        const newAgent: AgentProfile = {
+          id: makeId('ag'),
+          workspaceId: WORKSPACE_ID,
+          ownerUid: `local_${phoneDigits}`,
+          agentCode: generatedCode,
+          name: nameClean,
+          phone: phoneDigits,
+          email: authEmail,
+          assignedArea: cityClean,
+          city: cityClean,
+          upiId: upiClean,
+          approvalStatus: 'pending',
+          commissionRate: 0,
+          commissionPerConversion: 0,
+          defaultYearlyFee: ANNUAL_PLAN_PRICE_INR,
+          passcodeHash,
+          isActive: false,
+          createdAtMs: now,
+          updatedAtMs: now,
+        };
+        const local = loadLocalGrowthState();
+        local.agents = [newAgent, ...local.agents];
+        saveLocalGrowthState(local);
+        setAgents(local.agents);
+        updateRoleSession({
+          role: 'agent',
+          accountId: newAgent.id,
+          displayName: newAgent.name,
+        });
+        return { ok: true, agent: newAgent };
+      }
+
+      const signupOutcome = await signUpWithPhoneCredentials(
+        phoneDigits,
+        password,
+        nameClean
+      );
+      if (!signupOutcome.user) {
+        return {
+          ok: false,
+          error:
+            signupOutcome.error ||
+            'Could not register phone number and password.',
+        };
+      }
+
       const newAgent: AgentProfile = {
         id: makeId('ag'),
         workspaceId: WORKSPACE_ID,
-        ownerUid: user.uid,
+        ownerUid: signupOutcome.user.uid,
         agentCode: generatedCode,
         name: nameClean,
-        phone: phoneClean,
-        email: emailClean,
+        phone: phoneDigits,
+        email: authEmail,
         assignedArea: cityClean,
         city: cityClean,
         upiId: upiClean,
@@ -1384,21 +1461,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         updatedAtMs: now,
       };
 
-      if (!isConfigured) {
-        const local = loadLocalGrowthState();
-        local.agents = [newAgent, ...local.agents];
-        saveLocalGrowthState(local);
-        setAgents(local.agents);
-        updateRoleSession({
-          role: 'agent',
-          accountId: newAgent.id,
-          displayName: newAgent.name,
-        });
-        return { ok: true, agent: newAgent };
-      }
-
       try {
-        await cloudCreateAgent(user, newAgent);
+        await cloudCreateAgent(signupOutcome.user, newAgent);
+        setAgents((prev) =>
+          prev.some((a) => a.id === newAgent.id) ? prev : [newAgent, ...prev]
+        );
         updateRoleSession({
           role: 'agent',
           accountId: newAgent.id,
@@ -1412,7 +1479,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
     },
-    [agents, isConfigured, updateRoleSession, user]
+    [agents, isConfigured, signUpWithPhoneCredentials, updateRoleSession]
   );
 
   const updateAgentSelfProfile = useCallback(
@@ -1457,6 +1524,53 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     },
     [agents, isConfigured]
+  );
+
+  const changeAgentPassword = useCallback(
+    async (agentId: string, newPassword: string) => {
+      const target = agents.find((a) => a.id === agentId);
+      if (!target) return { ok: false, error: 'Agent profile not found.' };
+      if (newPassword.length < 6) {
+        return {
+          ok: false,
+          error: 'New password must be at least 6 characters long.',
+        };
+      }
+
+      if (isConfigured) {
+        const authRes = await changeCurrentPassword(newPassword);
+        if (!authRes.ok) {
+          return {
+            ok: false,
+            error: authRes.error || 'Could not update login password.',
+          };
+        }
+      }
+
+      const nextHash = await hashSecret(newPassword);
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.agents = local.agents.map((a) =>
+          a.id === agentId
+            ? { ...a, passcodeHash: nextHash, updatedAtMs: Date.now() }
+            : a
+        );
+        saveLocalGrowthState(local);
+        setAgents(local.agents);
+        return { ok: true };
+      }
+
+      try {
+        await cloudUpdateAgentPasswordHash(agentId, nextHash);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [agents, changeCurrentPassword, isConfigured]
   );
 
   const requestAgentPayout = useCallback(
@@ -1520,7 +1634,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       if (!user) {
-        return { ok: false, error: 'Sign in with Google first.' };
+        return { ok: false, error: 'Sign in first to request a payout.' };
       }
       try {
         await cloudCreatePayoutRequest(user, reqDoc);
@@ -1535,34 +1649,128 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     [agents, isConfigured, payoutRequests, studentSubscriptions, subscriptions, user]
   );
 
-  const loginAgentPasscode = useCallback(
-    async (identifier: string, passcode: string) => {
-      if (!user) {
+  const loginAgentPhonePassword = useCallback(
+    async (phone: string, password: string) => {
+      const phoneDigits = normalizePhoneDigits(phone);
+      if (phoneDigits.length < 7 || !password) {
+        return {
+          ok: false,
+          error: 'Enter your registered phone number and password.',
+        };
+      }
+
+      if (!isConfigured) {
+        const match = agents.find(
+          (a) => normalizePhoneDigits(a.phone) === phoneDigits
+        );
+        if (!match) {
+          return {
+            ok: false,
+            error: 'No Agent account found for this phone number.',
+          };
+        }
+        if (getAgentApprovalStatus(match) === 'suspended') {
+          return {
+            ok: false,
+            error: 'This Agent account has been suspended by Admin.',
+          };
+        }
+        const valid = await verifySecret(password, match.passcodeHash);
+        if (!valid) {
+          return { ok: false, error: 'Incorrect phone number or password.' };
+        }
+        updateRoleSession({
+          role: 'agent',
+          accountId: match.id,
+          displayName: match.name,
+        });
+        return { ok: true };
+      }
+
+      const authOutcome = await signInWithPhoneCredentials(phoneDigits, password);
+      if (authOutcome.user) {
+        const resolved = await resolveUserRoleFromFirestore(authOutcome.user);
+        if (resolved.inactiveAgent) {
+          await signOutUser();
+          return {
+            ok: false,
+            error: 'Your Agent account has been suspended by Admin.',
+          };
+        }
+        if (resolved.session) {
+          updateRoleSession(resolved.session);
+          return { ok: true };
+        }
         return {
           ok: false,
           error:
-            'Sign in with Google first to load your Cloud Firestore records.',
+            'Login verified, but your Agent workspace record was not found. Ask Admin to verify your Agent profile.',
         };
       }
+
+      // Legacy fallback only when a user is already signed in and the matching agent uses a non-phone email
+      if (user) {
+        const legacyMatch = agents.find(
+          (a) =>
+            normalizePhoneDigits(a.phone) === phoneDigits &&
+            !isPhoneAgentAuthEmail(a.email)
+        );
+        if (legacyMatch) {
+          if (getAgentApprovalStatus(legacyMatch) === 'suspended') {
+            return {
+              ok: false,
+              error: 'This Agent account has been suspended by Admin.',
+            };
+          }
+          const valid = await verifySecret(password, legacyMatch.passcodeHash);
+          if (valid) {
+            updateRoleSession({
+              role: 'agent',
+              accountId: legacyMatch.id,
+              displayName: legacyMatch.name,
+            });
+            return { ok: true };
+          }
+        }
+      }
+
+      return {
+        ok: false,
+        error: authOutcome.error || 'Incorrect phone number or password.',
+      };
+    },
+    [
+      agents,
+      isConfigured,
+      signInWithPhoneCredentials,
+      signOutUser,
+      updateRoleSession,
+      user,
+    ]
+  );
+
+  const loginAgentPasscode = useCallback(
+    async (identifier: string, passcode: string) => {
+      if (!user) {
+        return loginAgentPhonePassword(identifier, passcode);
+      }
       const idTrim = identifier.trim().toLowerCase();
+      const idDigits = normalizePhoneDigits(identifier);
       if (!idTrim || !passcode.trim()) {
         return {
           ok: false,
-          error: 'Enter your Agent ID, phone, or email and passcode.',
+          error: 'Enter your phone number or Agent ID and password.',
         };
       }
       const match = agents.find(
         (a) =>
           a.agentCode.toLowerCase() === idTrim ||
           a.phone.toLowerCase() === idTrim ||
+          (idDigits.length >= 7 && normalizePhoneDigits(a.phone) === idDigits) ||
           a.email.toLowerCase() === idTrim
       );
       if (!match) {
-        return {
-          ok: false,
-          error:
-            'Agent profile not found in your synced workspace. Sign in with the Google email assigned to your Agent profile.',
-        };
+        return loginAgentPhonePassword(identifier, passcode);
       }
       if (getAgentApprovalStatus(match) === 'suspended') {
         return {
@@ -1572,7 +1780,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       const valid = await verifySecret(passcode, match.passcodeHash);
       if (!valid) {
-        return { ok: false, error: 'Incorrect Agent passcode.' };
+        return { ok: false, error: 'Incorrect Agent password.' };
       }
       updateRoleSession({
         role: 'agent',
@@ -1581,7 +1789,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       return { ok: true };
     },
-    [agents, updateRoleSession, user]
+    [agents, loginAgentPhonePassword, updateRoleSession, user]
   );
 
   const loginParentPasscode = useCallback(
@@ -1698,43 +1906,61 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
       const codeClean = input.agentCode.trim().toUpperCase();
-      const emailClean = input.email.trim().toLowerCase();
-      if (
-        !codeClean ||
-        !input.name.trim() ||
-        !input.phone.trim() ||
-        !emailClean.includes('@') ||
-        !input.passcode.trim()
-      ) {
+      const phoneDigits = normalizePhoneDigits(input.phone);
+      const passwordClean = input.passcode.trim();
+      if (!codeClean || !input.name.trim() || phoneDigits.length < 7) {
         return {
           ok: false,
           error:
-            'Name, Agent ID, Phone, valid Google Email, and Passcode are all required.',
+            'Agent Name, Agent ID, and a valid Phone Number (at least 7 digits) are required.',
         };
       }
+      if (passwordClean.length < 6) {
+        return {
+          ok: false,
+          error: 'Agent Password must be at least 6 characters long.',
+        };
+      }
+
+      const authEmail = buildAgentAuthEmail(phoneDigits);
       const duplicate = agents.some(
         (a) =>
           a.agentCode.toLowerCase() === codeClean.toLowerCase() ||
-          a.email.toLowerCase() === emailClean
+          normalizePhoneDigits(a.phone) === phoneDigits ||
+          a.email.toLowerCase() === authEmail
       );
       if (duplicate) {
         return {
           ok: false,
-          error: `An Agent with ID "${codeClean}" or email "${emailClean}" already exists.`,
+          error: `An Agent with ID "${codeClean}" or phone "${phoneDigits}" already exists.`,
+        };
+      }
+
+      let provisionedUid: string | null = null;
+      try {
+        provisionedUid = await provisionAgentAuthAccount(
+          authEmail,
+          passwordClean
+        );
+      } catch (authErr) {
+        const formatted = formatPhoneAuthError(authErr);
+        return {
+          ok: false,
+          error: formatted.message,
         };
       }
 
       const now = Date.now();
-      const passcodeHash = await hashSecret(input.passcode);
+      const passcodeHash = await hashSecret(passwordClean);
       const areaClean = input.assignedArea.trim() || input.city?.trim() || 'General';
       const newAgent: AgentProfile = {
         id: makeId('ag'),
         workspaceId: WORKSPACE_ID,
-        ownerUid: user.uid,
+        ownerUid: provisionedUid || user.uid,
         agentCode: codeClean,
         name: input.name.trim(),
-        phone: input.phone.trim(),
-        email: emailClean,
+        phone: phoneDigits,
+        email: authEmail,
         assignedArea: areaClean,
         city: input.city?.trim() || areaClean,
         upiId: input.upiId?.trim() || '',
@@ -1792,11 +2018,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const existing = agents.find((a) => a.id === agentId);
       if (!existing) return { ok: false, error: 'Agent not found.' };
 
-      const emailClean = updates.email.trim().toLowerCase();
+      const phoneClean = normalizePhoneDigits(updates.phone) || existing.phone;
+      const emailClean =
+        updates.email.trim().toLowerCase() || existing.email || buildAgentAuthEmail(phoneClean);
       if (!emailClean.includes('@')) {
         return {
           ok: false,
-          error: 'A valid Google Email is required for cross-device Agent sync.',
+          error: 'Enter a valid mobile phone number or login email for this Agent.',
         };
       }
 
@@ -2498,10 +2726,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       recordTrialLeadIfReferred,
       signInAndRouteWithGoogle,
       signInWithGoogleRedirectFlow,
+      loginAgentPhonePassword,
       loginAgentPasscode,
       loginParentPasscode,
       registerSalesAgent,
       updateAgentSelfProfile,
+      changeAgentPassword,
       requestAgentPayout,
       switchToChildMode,
       exitChildModeToParent,
@@ -2569,10 +2799,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       recordTrialLeadIfReferred,
       signInAndRouteWithGoogle,
       signInWithGoogleRedirectFlow,
+      loginAgentPhonePassword,
       loginAgentPasscode,
       loginParentPasscode,
       registerSalesAgent,
       updateAgentSelfProfile,
+      changeAgentPassword,
       requestAgentPayout,
       switchToChildMode,
       exitChildModeToParent,

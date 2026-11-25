@@ -25,6 +25,19 @@ export function normalizeEmailLower(raw: string | null | undefined): string {
 
 export const normalizeEmailForMatch = normalizeEmailLower;
 
+export function buildAgentAuthEmail(phone: string): string {
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 7) return '';
+  return `agent.${digits}@gmaths.local`;
+}
+
+export function isPhoneAgentAuthEmail(
+  email: string | null | undefined
+): boolean {
+  const clean = normalizeEmailLower(email);
+  return /^agent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
+}
+
 export async function hashContactForAttribution(raw: string): Promise<string> {
   if (!raw.trim()) return '';
   return hashSecret(raw.trim().toLowerCase());

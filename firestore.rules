@@ -109,8 +109,16 @@ service cloud.firestore {
       return method is string && method in ['cash', 'upi', 'bank'];
     }
 
+    function isValidStudentPaymentMethod(method) {
+      return method is string && method in ['upi', 'card', 'voucher'];
+    }
+
     function isValidSubscriptionStatus(status) {
       return status is string && status in ['active', 'expired', 'suspended'];
+    }
+
+    function isValidApprovalStatus(status) {
+      return status is string && status in ['pending', 'approved', 'suspended'];
     }
 
     // -------------------------------------------------------------------------
@@ -173,12 +181,11 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'id', 'userId', 'displayName', 'mode', 'difficulty', 'sessionType',
           'durationSec', 'score', 'accuracy', 'bestStreak', 'avgResponseMs',
-          'qpm', 'isPublic', 'createdAt', 'updatedAt'
+          'qpm', 'isPublic', 'isHidden', 'isFlagged', 'flagReason', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id)
         && data.id == entryId
         && isValidId(data.userId)
-        && data.userId == request.auth.uid
         && data.displayName is string
         && data.displayName.size() >= 1
         && data.displayName.size() <= 40
@@ -193,6 +200,9 @@ service cloud.firestore {
         && data.avgResponseMs is int && data.avgResponseMs >= 0 && data.avgResponseMs <= 600000
         && (data.qpm is int || data.qpm is float) && data.qpm >= 0 && data.qpm <= 600
         && data.isPublic is bool && data.isPublic == true
+        && (!('isHidden' in data) || data.isHidden is bool)
+        && (!('isFlagged' in data) || data.isFlagged is bool)
+        && (!('flagReason' in data) || (data.flagReason is string && data.flagReason.size() <= 160))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -214,7 +224,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'workspaceId', 'ownerUid', 'agentCode', 'name', 'phone', 'email',
-          'assignedArea', 'commissionRate', 'defaultYearlyFee', 'passcodeHash',
+          'assignedArea', 'city', 'upiId', 'approvalStatus',
+          'commissionRate', 'commissionPerConversion', 'defaultYearlyFee', 'passcodeHash',
           'isActive', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id) && data.id == agentId
@@ -225,11 +236,35 @@ service cloud.firestore {
         && data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 40
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
         && data.assignedArea is string && data.assignedArea.size() >= 1 && data.assignedArea.size() <= 80
+        && (!('city' in data) || (data.city is string && data.city.size() <= 80))
+        && (!('upiId' in data) || (data.upiId is string && data.upiId.size() <= 100))
+        && (!('approvalStatus' in data) || isValidApprovalStatus(data.approvalStatus))
         && (data.commissionRate is int || data.commissionRate is float) && data.commissionRate >= 0 && data.commissionRate <= 100
+        && (!('commissionPerConversion' in data) || ((data.commissionPerConversion is int || data.commissionPerConversion is float) && data.commissionPerConversion >= 0 && data.commissionPerConversion <= 10000))
         && (data.defaultYearlyFee is int || data.defaultYearlyFee is float) && data.defaultYearlyFee >= 0 && data.defaultYearlyFee <= 1000000
         && data.passcodeHash is string && data.passcodeHash.size() >= 16 && data.passcodeHash.size() <= 128
         && data.isActive is bool
         && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidReferralCodePublic(data, code) {
+      return data.keys().hasAll([
+          'code', 'workspaceId', 'agentId', 'agentName', 'isActive',
+          'approvalStatus', 'emailHash', 'phoneHash', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'code', 'workspaceId', 'agentId', 'agentName', 'isActive',
+          'approvalStatus', 'emailHash', 'phoneHash', 'updatedAt'
+        ])
+        && isValidId(data.code) && data.code == code && data.code.size() >= 2 && data.code.size() <= 32
+        && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
+        && isValidId(data.agentId)
+        && data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 80
+        && data.isActive is bool
+        && isValidApprovalStatus(data.approvalStatus)
+        && data.emailHash is string && data.emailHash.size() <= 128
+        && data.phoneHash is string && data.phoneHash.size() <= 128
         && data.updatedAt is timestamp;
     }
 
@@ -295,7 +330,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'childId', 'workspaceId', 'ownerUid', 'name', 'grade',
-          'totalScore', 'sessionsCount', 'bestStreak', 'isPublic', 'createdAt', 'updatedAt'
+          'totalScore', 'sessionsCount', 'bestStreak', 'isPublic', 'isHidden', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id) && data.id == childId
         && isValidId(data.childId) && data.childId == childId
@@ -307,6 +342,7 @@ service cloud.firestore {
         && data.sessionsCount is int && data.sessionsCount >= 1 && data.sessionsCount <= 1000000
         && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 10000
         && data.isPublic is bool && data.isPublic == true
+        && (!('isHidden' in data) || data.isHidden is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -337,6 +373,126 @@ service cloud.firestore {
         && isValidId(data.collectedByAgentId)
         && isValidSubscriptionStatus(data.status)
         && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTrialLead(data, leadId) {
+      return data.keys().hasAll([
+          'id', 'workspaceId', 'ownerUid', 'name', 'email', 'phone',
+          'referralCode', 'agentId', 'agentEmail', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'workspaceId', 'ownerUid', 'name', 'email', 'phone',
+          'referralCode', 'agentId', 'agentEmail', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == leadId
+        && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
+        && isValidId(data.ownerUid)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.email is string && data.email.size() <= 120
+        && data.phone is string && data.phone.size() <= 40
+        && data.referralCode is string && data.referralCode.size() >= 2 && data.referralCode.size() <= 32
+        && isValidId(data.agentId)
+        && data.agentEmail is string && data.agentEmail.size() <= 120
+        && data.status is string && data.status in ['trial', 'converted']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudentSubscription(data, subscriptionId) {
+      return data.keys().hasAll([
+          'id', 'workspaceId', 'ownerUid', 'subscriberName', 'subscriberEmail', 'subscriberPhone',
+          'planType', 'startDate', 'expiryDate', 'amountPaid', 'discountApplied', 'paymentMethod',
+          'referralCode', 'attributedAgentId', 'agentEmail', 'voucherCode', 'commissionAmount',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'workspaceId', 'ownerUid', 'subscriberName', 'subscriberEmail', 'subscriberPhone',
+          'planType', 'startDate', 'expiryDate', 'amountPaid', 'discountApplied', 'paymentMethod',
+          'referralCode', 'attributedAgentId', 'agentEmail', 'voucherCode', 'commissionAmount',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == subscriptionId
+        && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
+        && isValidId(data.ownerUid)
+        && data.subscriberName is string && data.subscriberName.size() >= 1 && data.subscriberName.size() <= 80
+        && data.subscriberEmail is string && data.subscriberEmail.size() <= 120
+        && data.subscriberPhone is string && data.subscriberPhone.size() <= 40
+        && data.planType is string && data.planType == 'yearly'
+        && isValidDateString(data.startDate)
+        && isValidDateString(data.expiryDate)
+        && (data.amountPaid is int || data.amountPaid is float) && data.amountPaid >= 0 && data.amountPaid <= 100000
+        && (data.discountApplied is int || data.discountApplied is float) && data.discountApplied >= 0 && data.discountApplied <= 10000
+        && isValidStudentPaymentMethod(data.paymentMethod)
+        && data.referralCode is string && data.referralCode.size() <= 32
+        && data.attributedAgentId is string && data.attributedAgentId.size() <= 128
+        && data.agentEmail is string && data.agentEmail.size() <= 120
+        && data.voucherCode is string && data.voucherCode.size() <= 64
+        && (data.commissionAmount is int || data.commissionAmount is float) && data.commissionAmount >= 0 && data.commissionAmount <= 10000
+        && isValidSubscriptionStatus(data.status)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPayoutRequest(data, payoutId) {
+      return data.keys().hasAll([
+          'id', 'workspaceId', 'ownerUid', 'agentId', 'agentEmail', 'agentName',
+          'upiId', 'amount', 'status', 'utrNumber', 'createdAt', 'updatedAt', 'paidAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'workspaceId', 'ownerUid', 'agentId', 'agentEmail', 'agentName',
+          'upiId', 'amount', 'status', 'utrNumber', 'createdAt', 'updatedAt', 'paidAt'
+        ])
+        && isValidId(data.id) && data.id == payoutId
+        && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
+        && isValidId(data.ownerUid)
+        && isValidId(data.agentId)
+        && data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail.size() <= 120
+        && data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 80
+        && data.upiId is string && data.upiId.size() >= 3 && data.upiId.size() <= 100
+        && (data.amount is int || data.amount is float) && data.amount >= 500 && data.amount <= 1000000
+        && data.status is string && data.status in ['pending', 'paid']
+        && data.utrNumber is string && data.utrNumber.size() <= 80
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.paidAt is string && data.paidAt.size() <= 32;
+    }
+
+    function isValidOfflineVoucher(data, voucherId) {
+      return data.keys().hasAll([
+          'id', 'code', 'workspaceId', 'ownerUid', 'agentId', 'agentEmail', 'agentName',
+          'planAmount', 'status', 'redeemedByUid', 'redeemedByEmail', 'createdAt', 'redeemedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'workspaceId', 'ownerUid', 'agentId', 'agentEmail', 'agentName',
+          'planAmount', 'status', 'redeemedByUid', 'redeemedByEmail', 'createdAt', 'redeemedAt'
+        ])
+        && isValidId(data.id) && data.id == voucherId && data.id.size() >= 4 && data.id.size() <= 64
+        && data.code is string && data.code.size() >= 4 && data.code.size() <= 64
+        && isValidId(data.workspaceId) && data.workspaceId.size() <= 64
+        && isValidId(data.ownerUid)
+        && data.agentId is string && data.agentId.size() <= 128
+        && data.agentEmail is string && data.agentEmail.size() <= 120
+        && data.agentName is string && data.agentName.size() <= 80
+        && (data.planAmount is int || data.planAmount is float) && data.planAmount >= 0 && data.planAmount <= 100000
+        && data.status is string && data.status in ['unused', 'redeemed']
+        && data.redeemedByUid is string && data.redeemedByUid.size() <= 128
+        && data.redeemedByEmail is string && data.redeemedByEmail.size() <= 120
+        && data.createdAt is timestamp
+        && data.redeemedAt is string && data.redeemedAt.size() <= 32;
+    }
+
+    function isValidAppConfig(data, configId) {
+      return data.keys().hasAll([
+          'id', 'dailyChallengeSeed', 'announcementEnabled', 'announcementText', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'dailyChallengeSeed', 'announcementEnabled', 'announcementText', 'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == configId && data.id.size() <= 64
+        && data.dailyChallengeSeed is string && data.dailyChallengeSeed.size() >= 1 && data.dailyChallengeSeed.size() <= 64
+        && data.announcementEnabled is bool
+        && data.announcementText is string && data.announcementText.size() <= 240
         && data.updatedAt is timestamp;
     }
 
@@ -444,6 +600,8 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(entryId)
         && isValidLeaderboardEntry(incoming(), entryId)
+        && incoming().userId == request.auth.uid
+        && (!('isHidden' in incoming()) || incoming().isHidden == false)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && exists(/databases/$(database)/documents/users/$(request.auth.uid));
@@ -451,7 +609,6 @@ service cloud.firestore {
       allow update: if isVerifiedUser()
         && isValidId(entryId)
         && isValidLeaderboardEntry(incoming(), entryId)
-        && existing().userId == request.auth.uid
         && incoming().id == existing().id
         && incoming().userId == existing().userId
         && incoming().mode == existing().mode
@@ -463,26 +620,37 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (
-            (incoming().score > existing().score
-              || (incoming().score == existing().score && incoming().accuracy >= existing().accuracy))
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'displayName', 'score', 'accuracy', 'bestStreak', 'avgResponseMs', 'qpm', 'updatedAt'
-            ])
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['isHidden', 'isFlagged', 'flagReason', 'updatedAt'])
           )
           ||
           (
-            incoming().score == existing().score
-            && incoming().accuracy == existing().accuracy
-            && incoming().bestStreak == existing().bestStreak
-            && incoming().avgResponseMs == existing().avgResponseMs
-            && incoming().qpm == existing().qpm
-            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+            existing().userId == request.auth.uid
+            && (
+              (
+                (incoming().score > existing().score
+                  || (incoming().score == existing().score && incoming().accuracy >= existing().accuracy))
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'displayName', 'score', 'accuracy', 'bestStreak', 'avgResponseMs',
+                  'qpm', 'isFlagged', 'flagReason', 'updatedAt'
+                ])
+              )
+              ||
+              (
+                incoming().score == existing().score
+                && incoming().accuracy == existing().accuracy
+                && incoming().bestStreak == existing().bestStreak
+                && incoming().avgResponseMs == existing().avgResponseMs
+                && incoming().qpm == existing().qpm
+                && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+              )
+            )
           )
         );
 
       allow delete: if isVerifiedUser()
         && isValidId(entryId)
-        && existing().userId == request.auth.uid;
+        && (isAdmin() || existing().userId == request.auth.uid);
     }
 
     // -------------------------------------------------------------------------
@@ -500,7 +668,7 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // Collection 5: /agents/{agentId} — Field Agents
+    // Collection 5: /agents/{agentId} — Field & Sales Agents
     // -------------------------------------------------------------------------
     match /agents/{agentId} {
       allow get: if isVerifiedUser()
@@ -513,9 +681,20 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
-        && (incoming().ownerUid == request.auth.uid || isAdmin())
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            incoming().ownerUid == request.auth.uid
+            && incoming().email == userEmailLower()
+            && 'approvalStatus' in incoming()
+            && incoming().approvalStatus == 'pending'
+            && incoming().isActive == false
+            && incoming().commissionRate == 0
+            && (!('commissionPerConversion' in incoming()) || incoming().commissionPerConversion == 0)
+          )
+        );
 
       allow update: if isVerifiedUser()
         && isValidId(agentId)
@@ -529,14 +708,36 @@ service cloud.firestore {
         && (
           isAdmin()
           || incoming().diff(existing()).affectedKeys().hasOnly([
-            'agentCode', 'name', 'phone', 'email', 'assignedArea',
-            'commissionRate', 'defaultYearlyFee', 'passcodeHash', 'isActive', 'updatedAt'
+            'name', 'phone', 'assignedArea', 'city', 'upiId', 'passcodeHash', 'updatedAt'
           ])
         );
 
       allow delete: if isVerifiedUser()
         && isValidId(agentId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 5b: /referralCodes/{code} — Public Non-PII Promo Directory
+    // -------------------------------------------------------------------------
+    match /referralCodes/{code} {
+      allow get: if isValidId(code);
+      allow list: if isAdmin();
+
+      allow create, update: if isVerifiedUser()
+        && isValidId(code)
+        && isValidReferralCodePublic(incoming(), code)
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/agents/$(incoming().agentId))
+            && isAgentRecordAuthorized(get(/databases/$(database)/documents/agents/$(incoming().agentId)).data)
+            && incoming().isActive == get(/databases/$(database)/documents/agents/$(incoming().agentId)).data.isActive
+          )
+        );
+
+      allow delete: if isAdmin();
     }
 
     // -------------------------------------------------------------------------
@@ -632,10 +833,9 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // Collection 8: /childLeaderboard/{childId} — Public Non-PII Top 3 Champions
+    // Collection 8: /childLeaderboard/{childId} — Public Non-PII Top Champions
     // -------------------------------------------------------------------------
     match /childLeaderboard/{childId} {
-      // Zero-PII public rankings readable on Home Page (single-field index totalScore DESC)
       allow get: if isValidId(childId)
         && (resource == null || resource.data.isPublic == true);
 
@@ -644,10 +844,11 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(childId)
         && isValidChildLeaderboardEntry(incoming(), childId)
+        && (!('isHidden' in incoming()) || incoming().isHidden == false)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && exists(/databases/$(database)/documents/children/$(childId))
-        && isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data);
+        && (isAdmin() || isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data));
 
       allow update: if isVerifiedUser()
         && isValidId(childId)
@@ -658,13 +859,19 @@ service cloud.firestore {
         && incoming().isPublic == existing().isPublic
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/children/$(childId))
-        && isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data)
         && (
-          isAdmin()
-          || incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'grade', 'totalScore', 'sessionsCount', 'bestStreak', 'ownerUid', 'updatedAt'
-          ])
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['isHidden', 'updatedAt'])
+          )
+          ||
+          (
+            exists(/databases/$(database)/documents/children/$(childId))
+            && isFamilyScopedAuthorized(get(/databases/$(database)/documents/children/$(childId)).data)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'grade', 'totalScore', 'sessionsCount', 'bestStreak', 'ownerUid', 'updatedAt'
+            ])
+          )
         );
 
       allow delete: if isVerifiedUser()
@@ -673,7 +880,7 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // Collection 9: /subscriptions/{subscriptionId} — Yearly Subscription Ledger
+    // Collection 9: /subscriptions/{subscriptionId} — Yearly Parent Ledger
     // -------------------------------------------------------------------------
     match /subscriptions/{subscriptionId} {
       allow get: if isVerifiedUser()
@@ -724,7 +931,224 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // Collection 10: /practiceSessions/{sessionId} — Child Practice Sessions
+    // Collection 10: /leads/{leadId} — Trial Signups & Agent Follow-ups
+    // -------------------------------------------------------------------------
+    match /leads/{leadId} {
+      allow get: if isVerifiedUser()
+        && isValidId(leadId)
+        && (
+          resource == null
+          || isAdmin()
+          || resource.data.ownerUid == request.auth.uid
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow list: if isVerifiedUser()
+        && (
+          isAdmin()
+          || resource.data.ownerUid == request.auth.uid
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow create: if isVerifiedUser()
+        && isValidId(leadId)
+        && isValidTrialLead(incoming(), leadId)
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+
+      allow update: if isVerifiedUser()
+        && isValidId(leadId)
+        && isValidTrialLead(incoming(), leadId)
+        && (
+          isAdmin()
+          || existing().ownerUid == request.auth.uid
+          || (existing().agentEmail is string && existing().agentEmail.size() >= 3 && existing().agentEmail == userEmailLower())
+        )
+        && incoming().id == existing().id
+        && incoming().workspaceId == existing().workspaceId
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().agentId == existing().agentId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        );
+
+      allow delete: if isAdmin() && isValidId(leadId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 11: /studentSubscriptions/{subscriptionId} — Annual Pro Plans
+    // -------------------------------------------------------------------------
+    match /studentSubscriptions/{subscriptionId} {
+      allow get: if isVerifiedUser()
+        && isValidId(subscriptionId)
+        && (
+          resource == null
+          || isAdmin()
+          || resource.data.ownerUid == request.auth.uid
+          || (resource.data.subscriberEmail is string && resource.data.subscriberEmail.size() >= 3 && resource.data.subscriberEmail == userEmailLower())
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow list: if isVerifiedUser()
+        && (
+          isAdmin()
+          || resource.data.ownerUid == request.auth.uid
+          || (resource.data.subscriberEmail is string && resource.data.subscriberEmail.size() >= 3 && resource.data.subscriberEmail == userEmailLower())
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow create: if isVerifiedUser()
+        && isValidId(subscriptionId)
+        && isValidStudentSubscription(incoming(), subscriptionId)
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          incoming().attributedAgentId == ''
+          || (
+            exists(/databases/$(database)/documents/agents/$(incoming().attributedAgentId))
+            && (
+              isAdmin()
+              || (
+                get(/databases/$(database)/documents/agents/$(incoming().attributedAgentId)).data.ownerUid != request.auth.uid
+                && get(/databases/$(database)/documents/agents/$(incoming().attributedAgentId)).data.email != userEmailLower()
+                && incoming().commissionAmount <= 350
+              )
+            )
+          )
+        );
+
+      allow update: if isAdmin()
+        && isValidId(subscriptionId)
+        && isValidStudentSubscription(incoming(), subscriptionId)
+        && incoming().id == existing().id
+        && incoming().workspaceId == existing().workspaceId
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isAdmin() && isValidId(subscriptionId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 12: /payoutRequests/{payoutId} — Agent UPI Withdrawals
+    // -------------------------------------------------------------------------
+    match /payoutRequests/{payoutId} {
+      allow get: if isVerifiedUser()
+        && isValidId(payoutId)
+        && (
+          resource == null
+          || isAdmin()
+          || resource.data.ownerUid == request.auth.uid
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow list: if isVerifiedUser()
+        && (
+          isAdmin()
+          || resource.data.ownerUid == request.auth.uid
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow create: if isVerifiedUser()
+        && isValidId(payoutId)
+        && isValidPayoutRequest(incoming(), payoutId)
+        && incoming().status == 'pending'
+        && incoming().utrNumber == ''
+        && incoming().paidAt == ''
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/agents/$(incoming().agentId))
+        && get(/databases/$(database)/documents/agents/$(incoming().agentId)).data.isActive == true
+        && (
+          !('approvalStatus' in get(/databases/$(database)/documents/agents/$(incoming().agentId)).data)
+          || get(/databases/$(database)/documents/agents/$(incoming().agentId)).data.approvalStatus == 'approved'
+        )
+        && (
+          isAdmin()
+          || isAgentRecordAuthorized(get(/databases/$(database)/documents/agents/$(incoming().agentId)).data)
+        );
+
+      allow update: if isAdmin()
+        && isValidId(payoutId)
+        && isValidPayoutRequest(incoming(), payoutId)
+        && incoming().id == existing().id
+        && incoming().workspaceId == existing().workspaceId
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().agentId == existing().agentId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isAdmin() && isValidId(payoutId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 13: /vouchers/{voucherId} — Single-Use Offline Cash Vouchers
+    // -------------------------------------------------------------------------
+    match /vouchers/{voucherId} {
+      allow get: if isVerifiedUser() && isValidId(voucherId);
+
+      allow list: if isVerifiedUser()
+        && (
+          isAdmin()
+          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+        );
+
+      allow create: if isAdmin()
+        && isValidId(voucherId)
+        && isValidOfflineVoucher(incoming(), voucherId)
+        && incoming().status == 'unused'
+        && incoming().redeemedByUid == ''
+        && incoming().redeemedByEmail == ''
+        && incoming().redeemedAt == ''
+        && incoming().createdAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(voucherId)
+        && isValidOfflineVoucher(incoming(), voucherId)
+        && existing().status == 'unused'
+        && incoming().status == 'redeemed'
+        && incoming().id == existing().id
+        && incoming().code == existing().code
+        && incoming().workspaceId == existing().workspaceId
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().agentId == existing().agentId
+        && incoming().agentEmail == existing().agentEmail
+        && incoming().agentName == existing().agentName
+        && incoming().planAmount == existing().planAmount
+        && incoming().createdAt == existing().createdAt
+        && incoming().redeemedByUid == request.auth.uid
+        && incoming().redeemedByEmail == userEmailLower()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'redeemedByUid', 'redeemedByEmail', 'redeemedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(voucherId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 14: /appConfig/{configId} — Daily Challenge & Announcements
+    // -------------------------------------------------------------------------
+    match /appConfig/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if true;
+
+      allow create, update: if isAdmin()
+        && isValidId(configId)
+        && isValidAppConfig(incoming(), configId)
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 15: /practiceSessions/{sessionId} — Child Practice Sessions
     // -------------------------------------------------------------------------
     match /practiceSessions/{sessionId} {
       allow get: if isVerifiedUser()

@@ -4,14 +4,20 @@ import {
   Ban,
   Briefcase,
   Calendar,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
+  IndianRupee,
   LogOut,
+  MessageCircle,
   Plus,
   RefreshCw,
   Search,
   Trash2,
+  TrendingUp,
   UserPlus,
+  Wallet,
   X,
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
@@ -21,17 +27,25 @@ import {
   formatIndianClassLabel,
 } from '../../types/math';
 import {
+  AGENT_TIER2_THRESHOLD,
   ChildOnboardingInput,
   PAYMENT_METHOD_LABELS,
+  PAYOUT_MINIMUM_INR,
   PaymentMethod,
   addOneYearIso,
+  computeAgentCommissionSummary,
   evaluateSubscriptionState,
   formatCurrency,
   formatIsoDate,
+  getAgentApprovalStatus,
   todayIsoDate,
 } from '../../types/platform';
+import {
+  buildAgentReferralUrl,
+  buildWhatsAppPitchUrl,
+} from '../../utils/referral';
 
-type AgentTab = 'portfolio' | 'onboard';
+type AgentTab = 'portfolio' | 'leads' | 'payouts' | 'onboard';
 type PortfolioFilter = 'all' | 'active' | 'expiring_soon' | 'expired';
 
 function createBlankChild(): ChildOnboardingInput {
@@ -46,6 +60,9 @@ export const AgentDashboard: React.FC = () => {
     roleSession,
     parents,
     subscriptions,
+    leads,
+    studentSubscriptions,
+    payoutRequests,
     logoutRole,
     getAgentById,
     getChildrenForParent,
@@ -53,6 +70,8 @@ export const AgentDashboard: React.FC = () => {
     onboardParentAccount,
     addChildToParent,
     renewParentSubscription,
+    updateAgentSelfProfile,
+    requestAgentPayout,
   } = usePlatform();
 
   const agent = roleSession ? getAgentById(roleSession.accountId) : undefined;
@@ -61,6 +80,21 @@ export const AgentDashboard: React.FC = () => {
   const [filter, setFilter] = useState<PortfolioFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [copiedItem, setCopiedItem] = useState<'code' | 'link' | null>(null);
+
+  // Payout & Partner Profile Form State
+  const [payoutAmount, setPayoutAmount] = useState('500');
+  const [payoutUpi, setPayoutUpi] = useState(agent?.upiId ?? '');
+  const [payoutError, setPayoutError] = useState<string | null>(null);
+  const [submittingPayout, setSubmittingPayout] = useState(false);
+
+  const [profileName, setProfileName] = useState(agent?.name ?? '');
+  const [profilePhone, setProfilePhone] = useState(agent?.phone ?? '');
+  const [profileCity, setProfileCity] = useState(
+    agent?.city || agent?.assignedArea || ''
+  );
+  const [profileUpi, setProfileUpi] = useState(agent?.upiId ?? '');
+  const [savingProfile, setSavingProfile] = useState(false);
 
   // Onboard Parent + Children + Fee Form State
   const [parentName, setParentName] = useState('');
@@ -171,6 +205,41 @@ export const AgentDashboard: React.FC = () => {
     });
   }, [filter, myPortfolio, searchQuery]);
 
+  const myLeads = useMemo(() => {
+    if (!agent) return [];
+    return leads.filter((l) => l.agentId === agent.id);
+  }, [agent, leads]);
+
+  const myReferralSales = useMemo(() => {
+    if (!agent) return [];
+    return studentSubscriptions.filter((s) => s.attributedAgentId === agent.id);
+  }, [agent, studentSubscriptions]);
+
+  const myPayouts = useMemo(() => {
+    if (!agent) return [];
+    return payoutRequests.filter((p) => p.agentId === agent.id);
+  }, [agent, payoutRequests]);
+
+  const commissionLedger = useMemo(() => {
+    if (!agent) {
+      return {
+        totalConversions: 0,
+        monthConversions: 0,
+        currentRatePerConversion: 300,
+        totalEarned: 0,
+        pendingPayouts: 0,
+        paidOut: 0,
+        availableBalance: 0,
+      };
+    }
+    return computeAgentCommissionSummary(
+      agent,
+      studentSubscriptions,
+      subscriptions,
+      payoutRequests
+    );
+  }, [agent, payoutRequests, studentSubscriptions, subscriptions]);
+
   if (!agent) {
     return (
       <div className="max-w-md mx-auto px-4 py-12 text-center space-y-4">
@@ -188,8 +257,75 @@ export const AgentDashboard: React.FC = () => {
     );
   }
 
+  const approvalStatus = getAgentApprovalStatus(agent);
+  const isApproved = approvalStatus === 'approved';
+  const referralUrl = buildAgentReferralUrl(agent.agentCode);
+  const whatsappUrl = buildWhatsAppPitchUrl(agent.name, agent.agentCode);
+
   const computedExpiry = addOneYearIso(startDate);
   const computedRenewExpiry = addOneYearIso(renewStartDate);
+
+  const handleCopyText = async (value: string, kind: 'code' | 'link') => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedItem(kind);
+      window.setTimeout(() => setCopiedItem(null), 2000);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
+
+  const handleRequestPayoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPayoutError(null);
+    const numericAmount = Math.round(Number(payoutAmount) || 0);
+    const targetUpi = (payoutUpi || agent.upiId || '').trim();
+    if (!isApproved) {
+      setPayoutError('Account must be approved by Admin before requesting payouts.');
+      return;
+    }
+    if (numericAmount < PAYOUT_MINIMUM_INR) {
+      setPayoutError(`Minimum payout withdrawal is ₹${PAYOUT_MINIMUM_INR}.`);
+      return;
+    }
+    if (numericAmount > commissionLedger.availableBalance) {
+      setPayoutError('Requested amount exceeds your available balance.');
+      return;
+    }
+    if (!targetUpi.includes('@')) {
+      setPayoutError('Enter a valid UPI ID (e.g. name@okicici).');
+      return;
+    }
+    setSubmittingPayout(true);
+    const res = await requestAgentPayout(agent.id, numericAmount, targetUpi);
+    setSubmittingPayout(false);
+    if (!res.ok) {
+      setPayoutError(res.error || 'Could not submit payout request.');
+      return;
+    }
+    setNotice(
+      `Payout request of ${formatCurrency(numericAmount)} to ${targetUpi} submitted for Admin settlement.`
+    );
+    setPayoutAmount(String(PAYOUT_MINIMUM_INR));
+    setTimeout(() => setNotice(null), 5000);
+  };
+
+  const handleSaveSelfProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingProfile(true);
+    const res = await updateAgentSelfProfile(agent.id, {
+      name: profileName || agent.name,
+      phone: profilePhone || agent.phone,
+      city: profileCity || agent.city || agent.assignedArea,
+      upiId: profileUpi || agent.upiId || '',
+    });
+    setSavingProfile(false);
+    if (res.ok) {
+      setPayoutUpi(profileUpi || agent.upiId || '');
+      setNotice('Partner profile and payout UPI ID updated.');
+      setTimeout(() => setNotice(null), 4000);
+    }
+  };
 
   const handleUpdateChildRow = (
     idx: number,
@@ -307,23 +443,23 @@ export const AgentDashboard: React.FC = () => {
           <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
             <Briefcase className="w-4 h-4 shrink-0" />
             <span>
-              Field Agent · {agent.agentCode} · {agent.assignedArea}
+              Sales Partner · {agent.agentCode} · {agent.city || agent.assignedArea}
             </span>
           </div>
           <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white">
             {agent.name}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Onboard family accounts, collect yearly fees, and process 1-year
-            renewals.
+            Share referral links, track trial-to-annual conversions, onboard families, and withdraw commissions to UPI.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
+            disabled={!isApproved}
             onClick={() => setActiveTab('onboard')}
-            className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors whitespace-nowrap"
           >
             <UserPlus className="w-4 h-4 shrink-0" />
             Onboard Parent
@@ -339,89 +475,173 @@ export const AgentDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Agent Fee & Portfolio KPI Strip */}
+      {/* Approval Status Banner when Pending or Suspended */}
+      {approvalStatus === 'pending' && (
+        <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/35 p-4 sm:p-5 flex items-start gap-3 text-xs sm:text-sm text-amber-900 dark:text-amber-200">
+          <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">Partner Application Pending Admin Approval</p>
+            <p>
+              Your partner profile ({agent.agentCode}) is saved and awaiting Super Admin verification. Once approved, your promo code will activate ₹100 student discounts and UPI payout withdrawals.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {approvalStatus === 'suspended' && (
+        <div className="rounded-2xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 p-4 sm:p-5 flex items-start gap-3 text-xs sm:text-sm text-red-800 dark:text-red-300">
+          <Ban className="w-5 h-5 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">Partner Account Suspended</p>
+            <p>
+              Please contact Platform Admin to reactivate family onboarding and referral payouts.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Agent Earnings & Portfolio KPI Strip */}
       <section aria-label="Agent Fee Summary" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-1">
           <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            Total Fees Collected
+            Total Commission Earned
           </span>
           <p className="font-mono text-2xl sm:text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
-            {formatCurrency(summary.totalCollected)}
+            {formatCurrency(commissionLedger.totalEarned)}
           </p>
           <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-            Est. commission: {formatCurrency(summary.commissionEarned)} ({agent.commissionRate}%)
+            {commissionLedger.totalConversions} total conversions
           </span>
         </div>
 
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-1">
           <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            Active Plans
+            Available for Payout
           </span>
           <p className="font-mono text-2xl sm:text-3xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+            {formatCurrency(commissionLedger.availableBalance)}
+          </p>
+          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            Min withdrawal ₹{PAYOUT_MINIMUM_INR}
+          </span>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-1">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Monthly Rate Tier
+          </span>
+          <p className="font-mono text-2xl sm:text-3xl font-bold text-blue-700 dark:text-blue-400 tabular-nums">
+            {formatCurrency(commissionLedger.currentRatePerConversion)}
+          </p>
+          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            {commissionLedger.monthConversions} / {AGENT_TIER2_THRESHOLD} this month
+          </span>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-1">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Active Family Plans
+          </span>
+          <p className="font-mono text-2xl sm:text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
             {summary.activeCount}
           </p>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            in good standing
+          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            {summary.expiringCount} expiring · {myLeads.length} leads
           </span>
         </div>
+      </section>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-1">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            Expiring Soon
-          </span>
-          <p className="font-mono text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
-            {summary.expiringCount}
-          </p>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            within 30 days
-          </span>
-        </div>
+      {/* Referral Toolkit Card */}
+      <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="space-y-0.5 min-w-0">
+            <h2 className="font-display text-base font-bold text-slate-950 dark:text-white">
+              Referral &amp; WhatsApp Sharing Toolkit
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Students using code <strong className="font-mono text-slate-900 dark:text-white">{agent.agentCode}</strong> save ₹100 (pay ₹1,100/yr), and you earn{' '}
+              <strong className="font-mono text-emerald-700 dark:text-emerald-400">
+                {formatCurrency(commissionLedger.currentRatePerConversion)}
+              </strong>{' '}
+              per conversion.
+            </p>
+          </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-1">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            Expired / Inactive
-          </span>
-          <p className="font-mono text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400 tabular-nums">
-            {summary.expiredCount}
-          </p>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            ready for renewal
-          </span>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void handleCopyText(agent.agentCode, 'code')}
+              className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              {copiedItem === 'code' ? (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <Copy className="w-4 h-4 shrink-0" />
+              )}
+              {copiedItem === 'code' ? 'Copied Code' : `Code: ${agent.agentCode}`}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleCopyText(referralUrl, 'link')}
+              className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              {copiedItem === 'link' ? (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <Copy className="w-4 h-4 shrink-0" />
+              )}
+              {copiedItem === 'link' ? 'Link Copied' : 'Copy Referral Link'}
+            </button>
+
+            <a
+              href={whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <MessageCircle className="w-4 h-4 shrink-0" />
+              Share on WhatsApp
+            </a>
+          </div>
         </div>
+        <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate bg-slate-50 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800 rounded-lg px-3 py-2">
+          {referralUrl}
+        </p>
       </section>
 
       {/* Tabs */}
       <div
         role="tablist"
         aria-label="Agent workspace sections"
-        className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800"
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'portfolio'}
-          onClick={() => setActiveTab('portfolio')}
-          className={`min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap ${
-            activeTab === 'portfolio'
-              ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
-          }`}
-        >
-          My Portfolio ({myParents.length})
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'onboard'}
-          onClick={() => setActiveTab('onboard')}
-          className={`min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap ${
-            activeTab === 'onboard'
-              ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
-          }`}
-        >
-          Onboard Parent & Child
-        </button>
+        {(
+          [
+            { id: 'portfolio', label: `Families (${myParents.length})` },
+            {
+              id: 'leads',
+              label: `Leads & Sales (${myLeads.length + myReferralSales.length})`,
+            },
+            { id: 'payouts', label: 'Earnings & Payouts' },
+            { id: 'onboard', label: 'Onboard Family' },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`min-h-[44px] px-2.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap truncate ${
+              activeTab === tab.id
+                ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {notice && (
@@ -802,7 +1022,315 @@ export const AgentDashboard: React.FC = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 2: ONBOARD PARENT + CHILD(REN) + YEARLY FEE ACTIVATION            */}
+      {/* TAB 2: LEADS & REFERRAL CONVERSIONS                                   */}
+      {/* ===================================================================== */}
+      {activeTab === 'leads' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Trial Signups */}
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-base font-bold text-slate-950 dark:text-white">
+                Trial Signups ({myLeads.length})
+              </h2>
+              <TrendingUp className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            </div>
+            {myLeads.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                When students open your referral link and sign in with Google, they appear here automatically.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {myLeads.map((lead) => (
+                  <div
+                    key={lead.id}
+                    className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs sm:text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 dark:text-white truncate">
+                        {lead.name || lead.email}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                        {lead.email}
+                        {lead.phone ? ` · ${lead.phone}` : ''}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs font-bold shrink-0 ${
+                        lead.status === 'converted'
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-amber-600 dark:text-amber-400'
+                      }`}
+                    >
+                      {lead.status === 'converted' ? 'Paid Pro' : 'Trial'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Paid Annual Referral Conversions */}
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-base font-bold text-slate-950 dark:text-white">
+                Paid Annual Subscriptions ({myReferralSales.length})
+              </h2>
+              <IndianRupee className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            </div>
+            {myReferralSales.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Self-serve ₹1,100/₹1,200 conversions using your link or voucher appear here immediately.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {myReferralSales.map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs sm:text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 dark:text-white truncate">
+                        {sale.subscriberName}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                        {sale.subscriberEmail} · {formatIsoDate(sale.startDate)}
+                      </p>
+                    </div>
+                    <div className="text-right font-mono tabular-nums shrink-0">
+                      <span className="block font-bold text-emerald-700 dark:text-emerald-400">
+                        +{formatCurrency(sale.commissionAmount)}
+                      </span>
+                      <span className="text-[11px] font-sans text-slate-500 dark:text-slate-400">
+                        Paid {formatCurrency(sale.amountPaid)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 3: COMMISSION LEDGER, UPI PAYOUTS & PROFILE                       */}
+      {/* ===================================================================== */}
+      {activeTab === 'payouts' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Request Withdrawal Card */}
+          <section className="lg:col-span-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                  Request UPI Payout
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Withdraw ₹{PAYOUT_MINIMUM_INR}+ available commission directly to your UPI ID.
+                </p>
+              </div>
+              <Wallet className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-3.5 font-mono tabular-nums text-xs">
+              <div>
+                <span className="block font-sans text-slate-500 dark:text-slate-400">
+                  Available
+                </span>
+                <span className="text-sm sm:text-base font-bold text-emerald-700 dark:text-emerald-400">
+                  {formatCurrency(commissionLedger.availableBalance)}
+                </span>
+              </div>
+              <div>
+                <span className="block font-sans text-slate-500 dark:text-slate-400">
+                  Pending
+                </span>
+                <span className="text-sm sm:text-base font-bold text-amber-600 dark:text-amber-400">
+                  {formatCurrency(commissionLedger.pendingPayouts)}
+                </span>
+              </div>
+              <div>
+                <span className="block font-sans text-slate-500 dark:text-slate-400">
+                  Paid Out
+                </span>
+                <span className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                  {formatCurrency(commissionLedger.paidOut)}
+                </span>
+              </div>
+            </div>
+
+            {payoutError && (
+              <div className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3.5 py-2.5 flex items-center gap-2 text-xs text-red-700 dark:text-red-300">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{payoutError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleRequestPayoutSubmit} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Amount (INR) *
+                  </label>
+                  <input
+                    type="number"
+                    min={PAYOUT_MINIMUM_INR}
+                    max={Math.max(PAYOUT_MINIMUM_INR, commissionLedger.availableBalance)}
+                    required
+                    value={payoutAmount}
+                    onChange={(e) => setPayoutAmount(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Destination UPI ID *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={payoutUpi}
+                    onChange={(e) => setPayoutUpi(e.target.value)}
+                    placeholder="name@okicici"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={
+                  !isApproved ||
+                  submittingPayout ||
+                  commissionLedger.availableBalance < PAYOUT_MINIMUM_INR
+                }
+                className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-bold"
+              >
+                {submittingPayout ? 'Submitting Request…' : 'Request UPI Payout'}
+              </button>
+            </form>
+
+            {/* Payout History */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Withdrawal Ledger
+              </h3>
+              {myPayouts.length === 0 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  No payout requests yet.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {myPayouts.map((req) => (
+                    <div
+                      key={req.id}
+                      className="py-2.5 flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono font-bold text-slate-900 dark:text-white">
+                          {formatCurrency(req.amount)} → {req.upiId}
+                        </p>
+                        <p className="text-slate-500 dark:text-slate-400 truncate">
+                          {req.status === 'paid' && req.utrNumber
+                            ? `UTR: ${req.utrNumber} · Paid ${formatIsoDate(req.paidAt)}`
+                            : 'Pending Admin settlement'}
+                        </p>
+                      </div>
+                      <span
+                        className={`font-bold shrink-0 ${
+                          req.status === 'paid'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        {req.status === 'paid' ? 'Paid' : 'Pending'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Editable Partner Profile & UPI Details */}
+          <section className="lg:col-span-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div>
+              <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                Partner Profile &amp; Payout Settings
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Keep your City and UPI ID accurate for fast Admin settlements.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveSelfProfile} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={profilePhone}
+                    onChange={(e) => setProfilePhone(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    City
+                  </label>
+                  <input
+                    type="text"
+                    value={profileCity}
+                    onChange={(e) => setProfileCity(e.target.value)}
+                    placeholder="e.g. Pune"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Default UPI ID
+                  </label>
+                  <input
+                    type="text"
+                    value={profileUpi}
+                    onChange={(e) => setProfileUpi(e.target.value)}
+                    placeholder="name@okicici"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={savingProfile}
+                className="min-h-[44px] px-5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:bg-slate-800 dark:hover:bg-slate-100 text-xs sm:text-sm font-bold"
+              >
+                {savingProfile ? 'Saving…' : 'Save Partner Profile'}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 4: ONBOARD PARENT + CHILD(REN) + YEARLY FEE ACTIVATION            */}
       {/* ===================================================================== */}
       {activeTab === 'onboard' && (
         <form
@@ -1065,10 +1593,12 @@ export const AgentDashboard: React.FC = () => {
             </button>
             <button
               type="submit"
-              disabled={submittingOnboard}
+              disabled={submittingOnboard || !isApproved}
               className="min-h-[48px] px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-bold"
             >
-              {submittingOnboard
+              {!isApproved
+                ? 'Awaiting Admin Approval'
+                : submittingOnboard
                 ? 'Creating Account…'
                 : 'Create Accounts & Activate 1-Year Plan'}
             </button>

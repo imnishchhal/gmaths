@@ -27,10 +27,34 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       phone: '9876543210',
       email: 'agent1@example.com',
       assignedArea: 'North Zone',
+      city: 'Delhi',
+      upiId: 'agent1@okicici',
+      approvalStatus: 'approved',
       commissionRate: 15,
+      commissionPerConversion: 300,
       defaultYearlyFee: 1200,
       passcodeHash: 'a'.repeat(64),
       isActive: true,
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+    ag_pending: {
+      id: 'ag_pending',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'pending_uid',
+      agentCode: 'PEND01',
+      name: 'Pending Agent',
+      phone: '9111122222',
+      email: 'pending@example.com',
+      assignedArea: 'Pune',
+      city: 'Pune',
+      upiId: 'pending@upi',
+      approvalStatus: 'pending',
+      commissionRate: 0,
+      commissionPerConversion: 0,
+      defaultYearlyFee: 1200,
+      passcodeHash: 'p'.repeat(64),
+      isActive: false,
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
     },
@@ -73,6 +97,28 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
     },
   },
   childLeaderboard: {},
+  leaderboard: {
+    lb_1: {
+      id: 'lb_1',
+      userId: 'parent_uid',
+      displayName: 'Speedy',
+      mode: 'mixed',
+      difficulty: 'medium',
+      sessionType: 'sprint',
+      durationSec: 60,
+      score: 40,
+      accuracy: 95,
+      bestStreak: 12,
+      avgResponseMs: 1200,
+      qpm: 40,
+      isPublic: true,
+      isHidden: false,
+      isFlagged: false,
+      flagReason: '',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+  },
   subscriptions: {
     sub_1: {
       id: 'sub_1',
@@ -91,6 +137,79 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       status: 'active',
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
+    },
+  },
+  studentSubscriptions: {
+    ss_1: {
+      id: 'ss_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'student_uid',
+      subscriberName: 'Rohan',
+      subscriberEmail: 'rohan@example.com',
+      subscriberPhone: '9888877777',
+      planType: 'yearly',
+      startDate: '2026-01-01',
+      expiryDate: '2027-01-01',
+      amountPaid: 1100,
+      discountApplied: 100,
+      paymentMethod: 'upi',
+      referralCode: 'AG01',
+      attributedAgentId: 'ag_1',
+      agentEmail: 'agent1@example.com',
+      voucherCode: '',
+      commissionAmount: 300,
+      status: 'active',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+  },
+  payoutRequests: {
+    pay_1: {
+      id: 'pay_1',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'agent_uid',
+      agentId: 'ag_1',
+      agentEmail: 'agent1@example.com',
+      agentName: 'Field Agent One',
+      upiId: 'agent1@okicici',
+      amount: 600,
+      status: 'pending',
+      utrNumber: '',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+      paidAt: '',
+    },
+  },
+  vouchers: {
+    GMATHS_UNUSED01: {
+      id: 'GMATHS_UNUSED01',
+      code: 'GMATHS_UNUSED01',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'admin_uid',
+      agentId: 'ag_1',
+      agentEmail: 'agent1@example.com',
+      agentName: 'Field Agent One',
+      planAmount: 1200,
+      status: 'unused',
+      redeemedByUid: '',
+      redeemedByEmail: '',
+      createdAt: SERVER_TIME,
+      redeemedAt: '',
+    },
+    GMATHS_USED01: {
+      id: 'GMATHS_USED01',
+      code: 'GMATHS_USED01',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'admin_uid',
+      agentId: 'ag_1',
+      agentEmail: 'agent1@example.com',
+      agentName: 'Field Agent One',
+      planAmount: 1200,
+      status: 'redeemed',
+      redeemedByUid: 'student_uid',
+      redeemedByEmail: 'rohan@example.com',
+      createdAt: SERVER_TIME,
+      redeemedAt: '2026-02-01',
     },
   },
   practiceSessions: {
@@ -130,9 +249,26 @@ const isValidId = (id: unknown) =>
 const isValidDate = (d: unknown) =>
   typeof d === 'string' && d.length === 10 && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d);
 
-function hasExactKeys(data: Record<string, unknown>, keys: string[]): boolean {
+function hasAllowedKeys(
+  data: Record<string, unknown>,
+  required: string[],
+  allowed: string[]
+): boolean {
   const actual = Object.keys(data);
-  return actual.length === keys.length && keys.every((k) => actual.includes(k));
+  return (
+    required.every((k) => actual.includes(k)) &&
+    actual.every((k) => allowed.includes(k))
+  );
+}
+
+function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
+  if (!isVerified(auth)) return false;
+  const email = auth!.email.toLowerCase();
+  return (
+    data.ownerUid === auth!.uid ||
+    (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
+    (typeof data.email === 'string' && data.email.length >= 3 && data.email === email)
+  );
 }
 
 function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
@@ -163,11 +299,7 @@ function evaluateRule(
     if (op === 'get') {
       if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
-      const ok =
-        existing.ownerUid === auth!.uid ||
-        (isBootstrappedAdmin(auth) && existing.workspaceId === 'gmaths_main') ||
-        existing.email === auth!.email.toLowerCase();
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+      return isAgentAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
     }
     if (op === 'create' && incoming) {
       const req = [
@@ -175,17 +307,30 @@ function evaluateRule(
         'assignedArea', 'commissionRate', 'defaultYearlyFee', 'passcodeHash',
         'isActive', 'createdAt', 'updatedAt',
       ];
-      const ok =
+      const allowed = [
+        ...req,
+        'city', 'upiId', 'approvalStatus', 'commissionPerConversion',
+      ];
+      const validBase =
         isVerified(auth) &&
         isValidId(docId) &&
-        hasExactKeys(incoming, req) &&
+        hasAllowedKeys(incoming, req, allowed) &&
         incoming.id === docId &&
         typeof incoming.email === 'string' &&
         incoming.email.length >= 3 &&
-        (incoming.ownerUid === auth!.uid || isBootstrappedAdmin(auth)) &&
         incoming.createdAt === SERVER_TIME &&
         incoming.updatedAt === SERVER_TIME;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+
+      if (!validBase) return 'PERMISSION_DENIED';
+      if (isBootstrappedAdmin(auth)) return 'ALLOW';
+      const selfSignupOk =
+        incoming.ownerUid === auth!.uid &&
+        incoming.email === auth!.email.toLowerCase() &&
+        incoming.approvalStatus === 'pending' &&
+        incoming.isActive === false &&
+        incoming.commissionRate === 0 &&
+        (!('commissionPerConversion' in incoming) || incoming.commissionPerConversion === 0);
+      return selfSignupOk ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
 
@@ -203,10 +348,7 @@ function evaluateRule(
     }
     if (op === 'create' && incoming) {
       const agentId = String(incoming.createdByAgentId ?? '');
-      const ok =
-        isVerified(auth) &&
-        isValidId(docId) &&
-        Boolean(dbState.agents[agentId]);
+      const ok = isVerified(auth) && isValidId(docId) && Boolean(dbState.agents[agentId]);
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
@@ -221,7 +363,7 @@ function evaluateRule(
     const ok =
       isVerified(auth) &&
       isValidId(docId) &&
-      hasExactKeys(incoming, req) &&
+      hasAllowedKeys(incoming, req, req) &&
       INDIAN_CLASSES.has(String(incoming.grade)) &&
       Boolean(dbState.parents[parentId]) &&
       incoming.createdAt === SERVER_TIME &&
@@ -238,11 +380,13 @@ function evaluateRule(
         'id', 'childId', 'workspaceId', 'ownerUid', 'name', 'grade',
         'totalScore', 'sessionsCount', 'bestStreak', 'isPublic', 'createdAt', 'updatedAt',
       ];
+      const allowed = [...req, 'isHidden'];
       const childDoc = dbState.children[docId];
       const ok =
         isVerified(auth) &&
         isValidId(docId) &&
-        hasExactKeys(incoming, req) &&
+        hasAllowedKeys(incoming, req, allowed) &&
+        (!('isHidden' in incoming) || incoming.isHidden === false) &&
         incoming.id === docId &&
         incoming.childId === docId &&
         INDIAN_CLASSES.has(String(incoming.grade)) &&
@@ -254,6 +398,18 @@ function evaluateRule(
         incoming.updatedAt === SERVER_TIME;
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
+  }
+
+  if (col === 'leaderboard' && op === 'update' && incoming && existing) {
+    if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+    const diffKeys = Object.keys(incoming).filter((k) => incoming[k] !== existing[k]);
+    if (isBootstrappedAdmin(auth)) {
+      const ok = diffKeys.every((k) => ['isHidden', 'isFlagged', 'flagReason', 'updatedAt'].includes(k));
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (existing.userId !== auth!.uid) return 'PERMISSION_DENIED';
+    if (incoming.isHidden !== existing.isHidden) return 'PERMISSION_DENIED';
+    return 'ALLOW';
   }
 
   if (col === 'subscriptions') {
@@ -274,6 +430,86 @@ function evaluateRule(
         incoming.parentId === existing.parentId &&
         incoming.planType === 'yearly' &&
         isFamilyScopedAuthorized(auth, existing);
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+  }
+
+  if (col === 'studentSubscriptions') {
+    if (op === 'get') {
+      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!existing) return 'ALLOW';
+      const email = auth!.email.toLowerCase();
+      const ok =
+        isBootstrappedAdmin(auth) ||
+        existing.ownerUid === auth!.uid ||
+        existing.subscriberEmail === email ||
+        existing.agentEmail === email;
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'create' && incoming) {
+      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      const agentId = String(incoming.attributedAgentId ?? '');
+      if (agentId) {
+        const agentDoc = dbState.agents[agentId];
+        if (!agentDoc) return 'PERMISSION_DENIED';
+        if (!isBootstrappedAdmin(auth)) {
+          if (
+            agentDoc.ownerUid === auth!.uid ||
+            agentDoc.email === auth!.email.toLowerCase() ||
+            Number(incoming.commissionAmount ?? 0) > 350
+          ) {
+            return 'PERMISSION_DENIED';
+          }
+        }
+      }
+      return 'ALLOW';
+    }
+  }
+
+  if (col === 'payoutRequests') {
+    if (op === 'get') {
+      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!existing) return 'ALLOW';
+      const email = auth!.email.toLowerCase();
+      const ok =
+        isBootstrappedAdmin(auth) ||
+        existing.ownerUid === auth!.uid ||
+        existing.agentEmail === email;
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'create' && incoming) {
+      if (!isVerified(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      const agentDoc = dbState.agents[String(incoming.agentId ?? '')];
+      if (!agentDoc) return 'PERMISSION_DENIED';
+      const ok =
+        Number(incoming.amount ?? 0) >= 500 &&
+        incoming.status === 'pending' &&
+        incoming.utrNumber === '' &&
+        incoming.paidAt === '' &&
+        agentDoc.isActive === true &&
+        (agentDoc.approvalStatus === undefined || agentDoc.approvalStatus === 'approved') &&
+        (isBootstrappedAdmin(auth) || isAgentAuthorized(auth, agentDoc)) &&
+        incoming.createdAt === SERVER_TIME &&
+        incoming.updatedAt === SERVER_TIME;
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'update' && incoming && existing) {
+      return isBootstrappedAdmin(auth) ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+  }
+
+  if (col === 'vouchers') {
+    if (op === 'create' && incoming) {
+      return isBootstrappedAdmin(auth) && incoming.status === 'unused' ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'update' && incoming && existing) {
+      if (!isVerified(auth)) return 'PERMISSION_DENIED';
+      const ok =
+        existing.status === 'unused' &&
+        incoming.status === 'redeemed' &&
+        incoming.redeemedByUid === auth!.uid &&
+        incoming.redeemedByEmail === auth!.email.toLowerCase() &&
+        incoming.code === existing.code;
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
@@ -401,6 +637,80 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
       }),
   },
   {
+    name: 'DD-13 Agent Self-Approval Escalation Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'new_ag_uid', email: 'newag@example.com', email_verified: true }, 'agents', 'create', 'ag_self_ok', {
+        ...dbState.agents.ag_pending,
+        id: 'ag_self_ok',
+        ownerUid: 'new_ag_uid',
+        email: 'newag@example.com',
+        approvalStatus: 'approved',
+        isActive: true,
+      }),
+  },
+  {
+    name: 'DD-14 Pending Agent Payout Request Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'pending_uid', email: 'pending@example.com', email_verified: true }, 'payoutRequests', 'create', 'pay_pend', {
+        ...dbState.payoutRequests.pay_1,
+        id: 'pay_pend',
+        ownerUid: 'pending_uid',
+        agentId: 'ag_pending',
+        agentEmail: 'pending@example.com',
+      }),
+  },
+  {
+    name: 'DD-15 Below-Minimum ₹400 Payout Request Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'payoutRequests', 'create', 'pay_low', {
+        ...dbState.payoutRequests.pay_1,
+        id: 'pay_low',
+        ownerUid: 'agent_uid',
+        amount: 400,
+      }),
+  },
+  {
+    name: 'DD-16 Double Offline Voucher Redemption Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'attacker_uid', email: 'attacker@example.com', email_verified: true }, 'vouchers', 'update', 'GMATHS_USED01', {
+        ...dbState.vouchers.GMATHS_USED01,
+        status: 'redeemed',
+        redeemedByUid: 'attacker_uid',
+        redeemedByEmail: 'attacker@example.com',
+      }),
+  },
+  {
+    name: 'DD-17 Cross-Tenant StudentSubscription Read Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () => evaluateRule({ uid: 'attacker_uid', email: 'attacker@example.com', email_verified: true }, 'studentSubscriptions', 'get', 'ss_1'),
+  },
+  {
+    name: 'DD-18 Non-Admin Leaderboard isHidden Moderation Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'parent_uid', email: 'parent1@example.com', email_verified: true }, 'leaderboard', 'update', 'lb_1', {
+        ...dbState.leaderboard.lb_1,
+        isHidden: true,
+        updatedAt: SERVER_TIME + 1,
+      }),
+  },
+  {
+    name: 'DD-19 Agent Self-Referral Commission Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'studentSubscriptions', 'create', 'ss_self', {
+        ...dbState.studentSubscriptions.ss_1,
+        id: 'ss_self',
+        ownerUid: 'agent_uid',
+        subscriberEmail: 'agent1@example.com',
+        attributedAgentId: 'ag_1',
+      }),
+  },
+  {
     name: 'VALID-01 Parent Reads Own Profile Cross-Device via Verified Email',
     expected: 'ALLOW',
     run: () => evaluateRule({ uid: 'parent_mobile_uid', email: 'parent1@example.com', email_verified: true }, 'parents', 'get', 'par_1'),
@@ -429,6 +739,59 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
     expected: 'ALLOW',
     run: () => evaluateRule(null, 'childLeaderboard', 'list', '', { totalScore: 42 }),
   },
+  {
+    name: 'VALID-04 New Sales Agent Self-Sign-Up Strictly Pending',
+    expected: 'ALLOW',
+    run: () =>
+      evaluateRule({ uid: 'new_ag_uid', email: 'newag@example.com', email_verified: true }, 'agents', 'create', 'ag_self_new', {
+        ...dbState.agents.ag_pending,
+        id: 'ag_self_new',
+        ownerUid: 'new_ag_uid',
+        email: 'newag@example.com',
+        approvalStatus: 'pending',
+        isActive: false,
+        commissionRate: 0,
+        commissionPerConversion: 0,
+      }),
+  },
+  {
+    name: 'VALID-05 Approved Agent Requests ₹600 Payout to UPI',
+    expected: 'ALLOW',
+    run: () =>
+      evaluateRule({ uid: 'agent_uid', email: 'agent1@example.com', email_verified: true }, 'payoutRequests', 'create', 'pay_ok', {
+        ...dbState.payoutRequests.pay_1,
+        id: 'pay_ok',
+        ownerUid: 'agent_uid',
+      }),
+  },
+  {
+    name: 'VALID-06 Admin Settles Payout & Moderates Leaderboard',
+    expected: 'ALLOW',
+    run: () => {
+      const pRes = evaluateRule({ uid: 'admin_uid', email: BOOTSTRAPPED_ADMIN, email_verified: true }, 'payoutRequests', 'update', 'pay_1', {
+        ...dbState.payoutRequests.pay_1,
+        status: 'paid',
+        utrNumber: 'UTR99887766',
+      });
+      const mRes = evaluateRule({ uid: 'admin_uid', email: BOOTSTRAPPED_ADMIN, email_verified: true }, 'leaderboard', 'update', 'lb_1', {
+        ...dbState.leaderboard.lb_1,
+        isHidden: true,
+      });
+      return pRes === 'ALLOW' && mRes === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
+    },
+  },
+  {
+    name: 'VALID-07 Student Redeems Unused Offline Cash Voucher Once',
+    expected: 'ALLOW',
+    run: () =>
+      evaluateRule({ uid: 'student2_uid', email: 'student2@example.com', email_verified: true }, 'vouchers', 'update', 'GMATHS_UNUSED01', {
+        ...dbState.vouchers.GMATHS_UNUSED01,
+        status: 'redeemed',
+        redeemedByUid: 'student2_uid',
+        redeemedByEmail: 'student2@example.com',
+        redeemedAt: '2026-02-02',
+      }),
+  },
 ];
 
 for (const t of tests) {
@@ -437,4 +800,4 @@ for (const t of tests) {
   console.log(`PASS: ${t.name} -> ${actual}`);
 }
 
-console.log(`All ${tests.length} cross-device RBAC & Top 3 Champions security tests passed.`);
+console.log(`All ${tests.length} RBAC, referral, payout, voucher & leaderboard moderation security tests passed.`);

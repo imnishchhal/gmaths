@@ -8,6 +8,7 @@ import {
   EyeOff,
   LogOut,
   ShieldCheck,
+  UserPlus,
   Users,
 } from 'lucide-react';
 import { useFirebase } from '../../context/FirebaseContext';
@@ -84,10 +85,19 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
     signInWithGoogleRedirectFlow,
     loginAgentPasscode,
     loginParentPasscode,
+    registerSalesAgent,
     logoutRole,
   } = usePlatform();
 
   const [showPasscodeForm, setShowPasscodeForm] = useState(false);
+  const [showPartnerSignup, setShowPartnerSignup] = useState(false);
+  const [partnerName, setPartnerName] = useState(user?.displayName || '');
+  const [partnerPhone, setPartnerPhone] = useState('');
+  const [partnerCity, setPartnerCity] = useState('');
+  const [partnerUpi, setPartnerUpi] = useState('');
+  const [partnerCode, setPartnerCode] = useState('');
+  const [submittingPartner, setSubmittingPartner] = useState(false);
+
   const [identifier, setIdentifier] = useState('');
   const [secret, setSecret] = useState('');
   const [showSecret, setShowSecret] = useState(false);
@@ -124,6 +134,25 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
     if (!res.ok) {
       setError(res.error || 'Unable to open portal.');
     }
+  };
+
+  const handlePartnerSignupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSubmittingPartner(true);
+    const res = await registerSalesAgent({
+      name: partnerName,
+      phone: partnerPhone,
+      city: partnerCity,
+      upiId: partnerUpi,
+      agentCode: partnerCode.trim() || undefined,
+    });
+    setSubmittingPartner(false);
+    if (!res.ok) {
+      setError(res.error || 'Could not submit Sales Partner application.');
+      return;
+    }
+    onNavigateRoute('/agent');
   };
 
   const combinedError = error || authError || roleResolveNotice;
@@ -224,6 +253,120 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
           <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 p-4 text-xs sm:text-sm text-amber-800 dark:text-amber-300">
             Firebase is not configured yet. Configure Cloud Firestore to enable
             multi-device portals.
+          </div>
+        )}
+
+        {/* Sales Partner Self-Onboarding (Agent Signup with Name, Phone, City, UPI ID) */}
+        {targetRole === 'agent' && (
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+            <button
+              type="button"
+              onClick={() => setShowPartnerSignup((v) => !v)}
+              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/30 flex items-center justify-between text-xs font-bold text-blue-700 dark:text-blue-300"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <UserPlus className="w-4 h-4 shrink-0" />
+                Apply as Sales Partner (₹300–₹350/sale)
+              </span>
+              {showPartnerSignup ? (
+                <ChevronUp className="w-4 h-4 shrink-0" />
+              ) : (
+                <ChevronDown className="w-4 h-4 shrink-0" />
+              )}
+            </button>
+
+            {showPartnerSignup && (
+              <form onSubmit={handlePartnerSignupSubmit} className="space-y-3">
+                {isConfigured && !user && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl px-3 py-2">
+                    Sign in with Google above first, then complete your partner details below.
+                  </p>
+                )}
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-900 dark:text-white">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={partnerName}
+                    onChange={(e) => setPartnerName(e.target.value)}
+                    placeholder="e.g. Priya Nair"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-900 dark:text-white">
+                      Phone Number *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={partnerPhone}
+                      onChange={(e) => setPartnerPhone(e.target.value)}
+                      placeholder="10-digit mobile"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-900 dark:text-white">
+                      City *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={partnerCity}
+                      onChange={(e) => setPartnerCity(e.target.value)}
+                      placeholder="e.g. Pune"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-900 dark:text-white">
+                      UPI ID (for Payouts) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={partnerUpi}
+                      onChange={(e) => setPartnerUpi(e.target.value)}
+                      placeholder="name@okicici"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-900 dark:text-white">
+                      Preferred Code
+                    </label>
+                    <input
+                      type="text"
+                      value={partnerCode}
+                      onChange={(e) =>
+                        setPartnerCode(e.target.value.toUpperCase())
+                      }
+                      placeholder="Optional (e.g. PRIYA26)"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-mono uppercase text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submittingPartner || (isConfigured && !user)}
+                  className="w-full min-h-[44px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold"
+                >
+                  {submittingPartner
+                    ? 'Submitting Application…'
+                    : 'Register & Open Partner Portal'}
+                </button>
+              </form>
+            )}
           </div>
         )}
 

@@ -61,10 +61,11 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   const activeBucket = BUCKETS.find((b) => b.id === bucketId) ?? BUCKETS[1];
 
   const filteredChampions = useMemo(() => {
+    const visible = childLeaderboard.filter((c) => !c.isHidden);
     const base =
       classFilter === 'all'
-        ? childLeaderboard
-        : childLeaderboard.filter((c) => c.grade === classFilter);
+        ? visible
+        : visible.filter((c) => c.grade === classFilter);
     return [...base].sort((a, b) => {
       if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
       if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
@@ -76,6 +77,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
     return leaderboard
       .filter(
         (entry) =>
+          !entry.isHidden &&
           entry.mode === mode &&
           entry.difficulty === difficulty &&
           entry.sessionType === activeBucket.sessionType &&

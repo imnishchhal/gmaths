@@ -19,18 +19,29 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import {
+  AgentApprovalStatus,
   AgentProfile,
+  AppGlobalConfig,
   BOOTSTRAPPED_ADMIN_EMAIL,
   ChildLeaderboardEntry,
   ChildProfile,
+  DEFAULT_APP_CONFIG,
+  OfflineVoucher,
   ParentProfile,
   PaymentMethod,
+  PayoutRequest,
   PracticeSession,
+  ReferralCodePublic,
   RoleSession,
+  StudentPaymentMethod,
+  StudentSubscription,
   SubscriptionRecord,
   SubscriptionStatus,
+  TrialLead,
   WORKSPACE_ID,
   WeakTopic,
+  getAgentApprovalStatus,
+  todayIsoDate,
 } from '../types/platform';
 import {
   ArithmeticMode,
@@ -38,6 +49,11 @@ import {
   SessionType,
   normalizeIndianClass,
 } from '../types/math';
+import {
+  hashContactForAttribution,
+  normalizeEmailForMatch,
+  normalizePhoneForMatch,
+} from '../utils/referral';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import {
   ALLOWED_DIFFICULTIES,
@@ -68,8 +84,7 @@ function sanitizeEmail(raw: string): string {
 
 function sanitizeDate(raw: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return todayIsoDate();
 }
 
 function sanitizeHash(raw: string): string {
@@ -78,6 +93,10 @@ function sanitizeHash(raw: string): string {
 }
 
 function mapAgentDoc(id: string, x: DocumentData, fallbackUid: string): AgentProfile {
+  const approvalStatus = getAgentApprovalStatus({
+    isActive: Boolean(x.isActive),
+    approvalStatus: x.approvalStatus as AgentApprovalStatus | undefined,
+  });
   return {
     id: String(x.id ?? id),
     workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
@@ -87,7 +106,14 @@ function mapAgentDoc(id: string, x: DocumentData, fallbackUid: string): AgentPro
     phone: String(x.phone ?? ''),
     email: sanitizeEmail(String(x.email ?? '')),
     assignedArea: String(x.assignedArea ?? ''),
+    city: typeof x.city === 'string' ? x.city : undefined,
+    upiId: typeof x.upiId === 'string' ? x.upiId : undefined,
+    approvalStatus,
     commissionRate: Number(x.commissionRate ?? 0),
+    commissionPerConversion:
+      x.commissionPerConversion !== undefined
+        ? Number(x.commissionPerConversion)
+        : undefined,
     defaultYearlyFee: Number(x.defaultYearlyFee ?? 0),
     passcodeHash: String(x.passcodeHash ?? ''),
     isActive: Boolean(x.isActive),
@@ -196,16 +222,116 @@ function mapChildLeaderboardDoc(id: string, x: DocumentData): ChildLeaderboardEn
     sessionsCount: Math.max(0, Math.round(Number(x.sessionsCount ?? 0))),
     bestStreak: Math.max(0, Math.round(Number(x.bestStreak ?? 0))),
     isPublic: true,
+    isHidden: Boolean(x.isHidden),
     createdAtMs: tsToMs(x.createdAt),
     updatedAtMs: tsToMs(x.updatedAt),
   };
 }
 
-/**
- * Merges multiple Firestore queries for the same collection into a single real-time stream.
- * Each sub-query satisfies Firestore Security Rules using single-field equality filters
- * (no composite indexes required, instant cross-device sync on desktop & mobile).
- */
+function mapLeadDoc(id: string, x: DocumentData, fallbackUid: string): TrialLead {
+  return {
+    id: String(x.id ?? id),
+    workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
+    ownerUid: String(x.ownerUid ?? fallbackUid),
+    name: String(x.name ?? ''),
+    email: sanitizeEmail(String(x.email ?? '')),
+    phone: String(x.phone ?? ''),
+    referralCode: String(x.referralCode ?? ''),
+    agentId: String(x.agentId ?? ''),
+    agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
+    status: x.status === 'converted' ? 'converted' : 'trial',
+    createdAtMs: tsToMs(x.createdAt),
+    updatedAtMs: tsToMs(x.updatedAt),
+  };
+}
+
+function mapStudentSubDoc(
+  id: string,
+  x: DocumentData,
+  fallbackUid: string
+): StudentSubscription {
+  return {
+    id: String(x.id ?? id),
+    workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
+    ownerUid: String(x.ownerUid ?? fallbackUid),
+    subscriberName: String(x.subscriberName ?? 'Student'),
+    subscriberEmail: sanitizeEmail(String(x.subscriberEmail ?? '')),
+    subscriberPhone: String(x.subscriberPhone ?? ''),
+    planType: 'yearly',
+    startDate: String(x.startDate ?? ''),
+    expiryDate: String(x.expiryDate ?? ''),
+    amountPaid: Number(x.amountPaid ?? 0),
+    discountApplied: Number(x.discountApplied ?? 0),
+    paymentMethod: (x.paymentMethod as StudentPaymentMethod) ?? 'upi',
+    referralCode: String(x.referralCode ?? ''),
+    attributedAgentId: String(x.attributedAgentId ?? ''),
+    agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
+    voucherCode: String(x.voucherCode ?? ''),
+    commissionAmount: Number(x.commissionAmount ?? 0),
+    status: (x.status as SubscriptionStatus) ?? 'active',
+    createdAtMs: tsToMs(x.createdAt),
+    updatedAtMs: tsToMs(x.updatedAt),
+  };
+}
+
+function mapPayoutDoc(
+  id: string,
+  x: DocumentData,
+  fallbackUid: string
+): PayoutRequest {
+  return {
+    id: String(x.id ?? id),
+    workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
+    ownerUid: String(x.ownerUid ?? fallbackUid),
+    agentId: String(x.agentId ?? ''),
+    agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
+    agentName: String(x.agentName ?? ''),
+    upiId: String(x.upiId ?? ''),
+    amount: Number(x.amount ?? 0),
+    status: x.status === 'paid' ? 'paid' : 'pending',
+    utrNumber: String(x.utrNumber ?? ''),
+    createdAtMs: tsToMs(x.createdAt),
+    updatedAtMs: tsToMs(x.updatedAt),
+    paidAt: String(x.paidAt ?? ''),
+  };
+}
+
+function mapVoucherDoc(
+  id: string,
+  x: DocumentData,
+  fallbackUid: string
+): OfflineVoucher {
+  return {
+    id: String(x.id ?? id),
+    code: String(x.code ?? id),
+    workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
+    ownerUid: String(x.ownerUid ?? fallbackUid),
+    agentId: String(x.agentId ?? ''),
+    agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
+    agentName: String(x.agentName ?? ''),
+    planAmount: Number(x.planAmount ?? 1200),
+    status: x.status === 'redeemed' ? 'redeemed' : 'unused',
+    redeemedByUid: String(x.redeemedByUid ?? ''),
+    redeemedByEmail: sanitizeEmail(String(x.redeemedByEmail ?? '')),
+    createdAtMs: tsToMs(x.createdAt),
+    redeemedAt: String(x.redeemedAt ?? ''),
+  };
+}
+
+function mapAppConfigDoc(x: DocumentData): AppGlobalConfig {
+  return {
+    id: String(x.id ?? 'global'),
+    dailyChallengeSeed:
+      typeof x.dailyChallengeSeed === 'string' && x.dailyChallengeSeed.trim()
+        ? x.dailyChallengeSeed.trim()
+        : DEFAULT_APP_CONFIG.dailyChallengeSeed,
+    announcementEnabled: Boolean(x.announcementEnabled),
+    announcementText:
+      typeof x.announcementText === 'string' ? x.announcementText : '',
+    updatedAtMs: tsToMs(x.updatedAt),
+  };
+}
+
 function subscribeMergedQueries<T extends { id: string; createdAtMs: number }>(
   queries: Array<{ key: string; q: Query<DocumentData>; path: string }>,
   mapper: (id: string, data: DocumentData) => T,
@@ -285,6 +411,7 @@ export async function resolveUserRoleFromFirestore(
   user: User
 ): Promise<ResolvedFirestoreRole> {
   if (!db) return { session: null, route: '/' };
+  const firestore = db;
 
   const emailLower = sanitizeEmail(user.email ?? '');
 
@@ -302,7 +429,7 @@ export async function resolveUserRoleFromFirestore(
 
   // 2. Explicit /admins/{uid} doc
   try {
-    const adminSnap = await getDoc(doc(db, 'admins', user.uid));
+    const adminSnap = await getDoc(doc(firestore, 'admins', user.uid));
     if (adminSnap.exists()) {
       return {
         session: {
@@ -321,27 +448,32 @@ export async function resolveUserRoleFromFirestore(
     return { session: null, route: '/' };
   }
 
-  // 3. Field Agent matched by verified Google email
+  // 3. Field / Sales Agent matched by verified Google email (approved or pending)
   try {
     const agentSnap = await getDocs(
-      query(collection(db, 'agents'), where('email', '==', emailLower), limit(5))
+      query(collection(firestore, 'agents'), where('email', '==', emailLower), limit(5))
     );
     if (!agentSnap.empty) {
       const matchedAgents = agentSnap.docs.map((d) =>
         mapAgentDoc(d.id, d.data(), user.uid)
       );
-      const activeAgent = matchedAgents.find((a) => a.isActive);
-      if (activeAgent) {
-        return {
-          session: {
-            role: 'agent',
-            accountId: activeAgent.id,
-            displayName: activeAgent.name,
-          },
-          route: '/agent',
-        };
+      const preferredAgent =
+        matchedAgents.find((a) => getAgentApprovalStatus(a) === 'approved') ??
+        matchedAgents.find((a) => getAgentApprovalStatus(a) === 'pending') ??
+        matchedAgents[0];
+
+      const status = getAgentApprovalStatus(preferredAgent);
+      if (status === 'suspended') {
+        return { session: null, route: '/', inactiveAgent: true };
       }
-      return { session: null, route: '/', inactiveAgent: true };
+      return {
+        session: {
+          role: 'agent',
+          accountId: preferredAgent.id,
+          displayName: preferredAgent.name,
+        },
+        route: '/agent',
+      };
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'agents');
@@ -350,7 +482,7 @@ export async function resolveUserRoleFromFirestore(
   // 4. Parent matched by verified Google email
   try {
     const parentSnap = await getDocs(
-      query(collection(db, 'parents'), where('email', '==', emailLower), limit(5))
+      query(collection(firestore, 'parents'), where('email', '==', emailLower), limit(5))
     );
     if (!parentSnap.empty) {
       const parentDoc = parentSnap.docs[0];
@@ -383,6 +515,10 @@ export function subscribePlatformWorkspace(
     onChildren: (items: ChildProfile[]) => void;
     onSubscriptions: (items: SubscriptionRecord[]) => void;
     onPracticeSessions: (items: PracticeSession[]) => void;
+    onLeads: (items: TrialLead[]) => void;
+    onStudentSubscriptions: (items: StudentSubscription[]) => void;
+    onPayoutRequests: (items: PayoutRequest[]) => void;
+    onVouchers: (items: OfflineVoucher[]) => void;
     onReady?: () => void;
     onError: (err: Error) => void;
   }
@@ -400,7 +536,7 @@ export function subscribePlatformWorkspace(
   let settledCollections = 0;
   const markCollectionSettled = () => {
     settledCollections += 1;
-    if (settledCollections >= 5) {
+    if (settledCollections >= 9) {
       handlers.onReady?.();
     }
   };
@@ -539,6 +675,118 @@ export function subscribePlatformWorkspace(
             : []),
         ];
 
+  const buildAgentOwnerQueries = (colName: 'leads' | 'payoutRequests') =>
+    isBootstrappedAdmin
+      ? [
+          {
+            key: 'ws',
+            path: colName,
+            q: query(
+              collection(firestore, colName),
+              where('workspaceId', '==', WORKSPACE_ID),
+              limit(250)
+            ),
+          },
+        ]
+      : [
+          {
+            key: 'owner',
+            path: colName,
+            q: query(
+              collection(firestore, colName),
+              where('ownerUid', '==', user.uid),
+              limit(250)
+            ),
+          },
+          ...(user.emailVerified && emailLower.length >= 3
+            ? [
+                {
+                  key: 'agentEmail',
+                  path: colName,
+                  q: query(
+                    collection(firestore, colName),
+                    where('agentEmail', '==', emailLower),
+                    limit(250)
+                  ),
+                },
+              ]
+            : []),
+        ];
+
+  const studentSubQueries: Array<{ key: string; q: Query<DocumentData>; path: string }> =
+    isBootstrappedAdmin
+      ? [
+          {
+            key: 'ws',
+            path: 'studentSubscriptions',
+            q: query(
+              collection(firestore, 'studentSubscriptions'),
+              where('workspaceId', '==', WORKSPACE_ID),
+              limit(250)
+            ),
+          },
+        ]
+      : [
+          {
+            key: 'owner',
+            path: 'studentSubscriptions',
+            q: query(
+              collection(firestore, 'studentSubscriptions'),
+              where('ownerUid', '==', user.uid),
+              limit(100)
+            ),
+          },
+          ...(user.emailVerified && emailLower.length >= 3
+            ? [
+                {
+                  key: 'subEmail',
+                  path: 'studentSubscriptions',
+                  q: query(
+                    collection(firestore, 'studentSubscriptions'),
+                    where('subscriberEmail', '==', emailLower),
+                    limit(100)
+                  ),
+                },
+                {
+                  key: 'agentEmail',
+                  path: 'studentSubscriptions',
+                  q: query(
+                    collection(firestore, 'studentSubscriptions'),
+                    where('agentEmail', '==', emailLower),
+                    limit(250)
+                  ),
+                },
+              ]
+            : []),
+        ];
+
+  const voucherQueries: Array<{ key: string; q: Query<DocumentData>; path: string }> =
+    isBootstrappedAdmin
+      ? [
+          {
+            key: 'ws',
+            path: 'vouchers',
+            q: query(
+              collection(firestore, 'vouchers'),
+              where('workspaceId', '==', WORKSPACE_ID),
+              limit(250)
+            ),
+          },
+        ]
+      : user.emailVerified && emailLower.length >= 3
+      ? [
+          {
+            key: 'agentEmail',
+            path: 'vouchers',
+            q: query(
+              collection(firestore, 'vouchers'),
+              where('agentEmail', '==', emailLower),
+              limit(100)
+            ),
+          },
+        ]
+      : [];
+
   const unsubs: Unsubscribe[] = [
     subscribeMergedQueries(
       agentQueries,
@@ -575,6 +823,34 @@ export function subscribePlatformWorkspace(
       handlers.onError,
       markCollectionSettled
     ),
+    subscribeMergedQueries(
+      buildAgentOwnerQueries('leads'),
+      (id, data) => mapLeadDoc(id, data, user.uid),
+      handlers.onLeads,
+      handlers.onError,
+      markCollectionSettled
+    ),
+    subscribeMergedQueries(
+      studentSubQueries,
+      (id, data) => mapStudentSubDoc(id, data, user.uid),
+      handlers.onStudentSubscriptions,
+      handlers.onError,
+      markCollectionSettled
+    ),
+    subscribeMergedQueries(
+      buildAgentOwnerQueries('payoutRequests'),
+      (id, data) => mapPayoutDoc(id, data, user.uid),
+      handlers.onPayoutRequests,
+      handlers.onError,
+      markCollectionSettled
+    ),
+    subscribeMergedQueries(
+      voucherQueries,
+      (id, data) => mapVoucherDoc(id, data, user.uid),
+      handlers.onVouchers,
+      handlers.onError,
+      markCollectionSettled
+    ),
   ];
 
   return () => {
@@ -583,7 +859,7 @@ export function subscribePlatformWorkspace(
 }
 
 // -----------------------------------------------------------------------------
-// Public Real-Time Child Champions Query (Home Page Top 3 & Full Board)
+// Public Real-Time Listeners (Child Champions & AppGlobalConfig)
 // -----------------------------------------------------------------------------
 
 export function subscribeChildChampions(
@@ -595,10 +871,10 @@ export function subscribeChildChampions(
     onItems([]);
     return () => {};
   }
+  const firestore = db;
 
-  // Single-field automatic index on totalScore (zero composite index required)
   const q = query(
-    collection(db, 'childLeaderboard'),
+    collection(firestore, 'childLeaderboard'),
     where('totalScore', '>=', 1),
     orderBy('totalScore', 'desc'),
     limit(Math.max(1, Math.min(50, maxResults)))
@@ -626,8 +902,89 @@ export function subscribeChildChampions(
   );
 }
 
+export function subscribeAppConfig(
+  onConfig: (config: AppGlobalConfig) => void
+): Unsubscribe {
+  if (!db) {
+    onConfig(DEFAULT_APP_CONFIG);
+    return () => {};
+  }
+  const firestore = db;
+  return onSnapshot(
+    doc(firestore, 'appConfig', 'global'),
+    (snap) => {
+      if (snap.exists()) {
+        onConfig(mapAppConfigDoc(snap.data()));
+      } else {
+        onConfig(DEFAULT_APP_CONFIG);
+      }
+    },
+    () => {
+      onConfig(DEFAULT_APP_CONFIG);
+    }
+  );
+}
+
 // -----------------------------------------------------------------------------
-// Cloud Firestore Mutations (strictly synchronized with firebase-blueprint.json)
+// Referral Directory Sync & Zero-PII Lookup
+// -----------------------------------------------------------------------------
+
+async function cloudSyncReferralCode(agent: AgentProfile): Promise<void> {
+  if (!db) return;
+  const firestore = db;
+  const code = sanitizeCode(agent.agentCode.toUpperCase(), agent.id.slice(0, 12));
+  const [emailHash, phoneHash] = await Promise.all([
+    hashContactForAttribution(normalizeEmailForMatch(agent.email)),
+    hashContactForAttribution(normalizePhoneForMatch(agent.phone)),
+  ]);
+  const approvalStatus = getAgentApprovalStatus(agent);
+  const path = `referralCodes/${code}`;
+  try {
+    await setDoc(doc(firestore, 'referralCodes', code), {
+      code,
+      workspaceId: WORKSPACE_ID,
+      agentId: sanitizeId(agent.id, 'ag'),
+      agentName: (agent.name.trim() || 'Sales Partner').slice(0, 80),
+      isActive: Boolean(agent.isActive),
+      approvalStatus,
+      emailHash,
+      phoneHash,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function lookupReferralCodeCloud(
+  rawCode: string
+): Promise<ReferralCodePublic | null> {
+  if (!db) return null;
+  const firestore = db;
+  const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9_\-]/g, '');
+  if (code.length < 2) return null;
+  try {
+    const snap = await getDoc(doc(firestore, 'referralCodes', code));
+    if (!snap.exists()) return null;
+    const x = snap.data();
+    return {
+      code: String(x.code ?? code),
+      workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
+      agentId: String(x.agentId ?? ''),
+      agentName: String(x.agentName ?? 'Partner'),
+      isActive: Boolean(x.isActive),
+      approvalStatus: (x.approvalStatus as AgentApprovalStatus) ?? 'approved',
+      emailHash: String(x.emailHash ?? ''),
+      phoneHash: String(x.phoneHash ?? ''),
+      updatedAtMs: tsToMs(x.updatedAt),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Cloud Firestore Mutations
 // -----------------------------------------------------------------------------
 
 export async function cloudCreateAgent(
@@ -635,53 +992,100 @@ export async function cloudCreateAgent(
   agent: AgentProfile
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(agent.id, 'ag');
   const path = `agents/${id}`;
   const email = sanitizeEmail(agent.email);
   if (email.length < 3) {
     throw new Error('Agent email is required for cross-device Google Sign-In.');
   }
+  const approvalStatus = getAgentApprovalStatus(agent);
+  const payload: Record<string, unknown> = {
+    id,
+    workspaceId: WORKSPACE_ID,
+    ownerUid: sanitizeId(user.uid, 'u'),
+    agentCode: sanitizeCode(agent.agentCode, id.slice(0, 12)),
+    name: (agent.name.trim() || 'Agent').slice(0, 80),
+    phone: (agent.phone.trim() || '000').slice(0, 40),
+    email,
+    assignedArea: (agent.assignedArea.trim() || 'General').slice(0, 80),
+    city: (agent.city ?? agent.assignedArea).trim().slice(0, 80),
+    upiId: (agent.upiId ?? '').trim().slice(0, 100),
+    approvalStatus,
+    commissionRate: clamp(agent.commissionRate, 0, 100),
+    commissionPerConversion: clamp(agent.commissionPerConversion ?? 0, 0, 10000),
+    defaultYearlyFee: clamp(agent.defaultYearlyFee, 0, 1000000),
+    passcodeHash: sanitizeHash(agent.passcodeHash),
+    isActive: Boolean(agent.isActive),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
   try {
-    await setDoc(doc(db, 'agents', id), {
-      id,
-      workspaceId: WORKSPACE_ID,
-      ownerUid: sanitizeId(user.uid, 'u'),
-      agentCode: sanitizeCode(agent.agentCode, id.slice(0, 12)),
-      name: (agent.name.trim() || 'Agent').slice(0, 80),
-      phone: (agent.phone.trim() || '000').slice(0, 40),
-      email,
-      assignedArea: (agent.assignedArea.trim() || 'General').slice(0, 80),
-      commissionRate: clamp(agent.commissionRate, 0, 100),
-      defaultYearlyFee: clamp(agent.defaultYearlyFee, 0, 1000000),
-      passcodeHash: sanitizeHash(agent.passcodeHash),
-      isActive: Boolean(agent.isActive),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(doc(firestore, 'agents', id), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
+  await cloudSyncReferralCode({
+    ...agent,
+    id,
+    email,
+    approvalStatus,
+  });
 }
 
 export async function cloudUpdateAgent(agent: AgentProfile): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(agent.id, 'ag');
   const path = `agents/${id}`;
   const email = sanitizeEmail(agent.email);
   if (email.length < 3) {
     throw new Error('Agent email is required for cross-device Google Sign-In.');
   }
+  const approvalStatus = getAgentApprovalStatus(agent);
   try {
-    await updateDoc(doc(db, 'agents', id), {
+    await updateDoc(doc(firestore, 'agents', id), {
       agentCode: sanitizeCode(agent.agentCode, id.slice(0, 12)),
       name: (agent.name.trim() || 'Agent').slice(0, 80),
       phone: (agent.phone.trim() || '000').slice(0, 40),
       email,
       assignedArea: (agent.assignedArea.trim() || 'General').slice(0, 80),
+      city: (agent.city ?? agent.assignedArea).trim().slice(0, 80),
+      upiId: (agent.upiId ?? '').trim().slice(0, 100),
+      approvalStatus,
       commissionRate: clamp(agent.commissionRate, 0, 100),
+      commissionPerConversion: clamp(agent.commissionPerConversion ?? 0, 0, 10000),
       defaultYearlyFee: clamp(agent.defaultYearlyFee, 0, 1000000),
       passcodeHash: sanitizeHash(agent.passcodeHash),
       isActive: Boolean(agent.isActive),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+  await cloudSyncReferralCode({
+    ...agent,
+    id,
+    email,
+    approvalStatus,
+  });
+}
+
+export async function cloudUpdateAgentSelfProfile(
+  agent: AgentProfile,
+  patch: { name: string; phone: string; city: string; upiId: string }
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(agent.id, 'ag');
+  const path = `agents/${id}`;
+  try {
+    await updateDoc(doc(firestore, 'agents', id), {
+      name: (patch.name.trim() || agent.name).slice(0, 80),
+      phone: (patch.phone.trim() || agent.phone).slice(0, 40),
+      city: patch.city.trim().slice(0, 80),
+      assignedArea: (patch.city.trim() || agent.assignedArea).slice(0, 80),
+      upiId: patch.upiId.trim().slice(0, 100),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -694,10 +1098,11 @@ export async function cloudCreateParent(
   parent: ParentProfile
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(parent.id, 'par');
   const path = `parents/${id}`;
   try {
-    await setDoc(doc(db, 'parents', id), {
+    await setDoc(doc(firestore, 'parents', id), {
       id,
       workspaceId: WORKSPACE_ID,
       ownerUid: sanitizeId(user.uid, 'u'),
@@ -724,10 +1129,11 @@ export async function cloudCreateChild(
   child: ChildProfile
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(child.id, 'ch');
   const path = `children/${id}`;
   try {
-    await setDoc(doc(db, 'children', id), {
+    await setDoc(doc(firestore, 'children', id), {
       id,
       workspaceId: WORKSPACE_ID,
       ownerUid: sanitizeId(user.uid, 'u'),
@@ -753,10 +1159,11 @@ export async function cloudCreateSubscription(
   sub: SubscriptionRecord
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(sub.id, 'sub');
   const path = `subscriptions/${id}`;
   try {
-    await setDoc(doc(db, 'subscriptions', id), {
+    await setDoc(doc(firestore, 'subscriptions', id), {
       id,
       workspaceId: WORKSPACE_ID,
       ownerUid: sanitizeId(user.uid, 'u'),
@@ -787,10 +1194,11 @@ export async function cloudUpdateSubscription(
   sub: SubscriptionRecord
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(sub.id, 'sub');
   const path = `subscriptions/${id}`;
   try {
-    await updateDoc(doc(db, 'subscriptions', id), {
+    await updateDoc(doc(firestore, 'subscriptions', id), {
       startDate: sanitizeDate(sub.startDate),
       expiryDate: sanitizeDate(sub.expiryDate),
       feeAmount: clamp(sub.feeAmount, 0, 1000000),
@@ -814,6 +1222,7 @@ export async function cloudCreatePracticeSession(
   session: PracticeSession
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const id = sanitizeId(session.id, 'ps');
   const path = `practiceSessions/${id}`;
   const score = Math.round(clamp(session.score, 0, 5000));
@@ -841,7 +1250,7 @@ export async function cloudCreatePracticeSession(
     : 'none';
 
   try {
-    await setDoc(doc(db, 'practiceSessions', id), {
+    await setDoc(doc(firestore, 'practiceSessions', id), {
       id,
       workspaceId: WORKSPACE_ID,
       ownerUid: sanitizeId(user.uid, 'u'),
@@ -882,6 +1291,7 @@ export async function cloudUpdateChildScoreAndLeaderboard(
   nextBestStreak: number
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
   const childId = sanitizeId(child.id, 'ch');
   const safeTotalScore = Math.round(clamp(nextTotalScore, 0, 10000000));
   const safeSessionsCount = Math.round(clamp(nextSessionsCount, 0, 1000000));
@@ -889,9 +1299,8 @@ export async function cloudUpdateChildScoreAndLeaderboard(
   const safeGrade = normalizeIndianClass(child.grade);
   const safeName = (child.name.trim() || 'Student').slice(0, 60);
 
-  // 1. Update aggregate counters on /children/{childId}
   try {
-    await updateDoc(doc(db, 'children', childId), {
+    await updateDoc(doc(firestore, 'children', childId), {
       totalScore: safeTotalScore,
       sessionsCount: safeSessionsCount,
       bestStreak: safeBestStreak,
@@ -901,10 +1310,9 @@ export async function cloudUpdateChildScoreAndLeaderboard(
     handleFirestoreError(error, OperationType.UPDATE, `children/${childId}`);
   }
 
-  // 2. Upsert zero-PII public leaderboard record on /childLeaderboard/{childId} when score >= 1
   if (safeTotalScore < 1) return;
 
-  const lbRef = doc(db, 'childLeaderboard', childId);
+  const lbRef = doc(firestore, 'childLeaderboard', childId);
   const lbPath = `childLeaderboard/${childId}`;
   let existing = false;
   try {
@@ -941,11 +1349,264 @@ export async function cloudUpdateChildScoreAndLeaderboard(
         sessionsCount: Math.max(1, safeSessionsCount),
         bestStreak: safeBestStreak,
         isPublic: true,
+        isHidden: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, lbPath);
     }
+  }
+}
+
+export async function cloudUpdateChildLeaderboardVisibility(
+  childId: string,
+  isHidden: boolean
+): Promise<void> {
+  if (!db) return;
+  const firestore = db;
+  const safeId = sanitizeId(childId, 'ch');
+  try {
+    await updateDoc(doc(firestore, 'childLeaderboard', safeId), {
+      isHidden,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `childLeaderboard/${safeId}`);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Growth, Leads, Student Subscriptions, Payouts, Vouchers, AppConfig
+// -----------------------------------------------------------------------------
+
+export async function cloudCreateTrialLead(
+  user: User,
+  lead: TrialLead
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(lead.id, 'lead');
+  try {
+    await setDoc(doc(firestore, 'leads', id), {
+      id,
+      workspaceId: WORKSPACE_ID,
+      ownerUid: sanitizeId(user.uid, 'u'),
+      name: (lead.name.trim() || 'Student').slice(0, 80),
+      email: sanitizeEmail(lead.email),
+      phone: lead.phone.trim().slice(0, 40),
+      referralCode: sanitizeCode(lead.referralCode, 'REF'),
+      agentId: sanitizeId(lead.agentId, 'ag'),
+      agentEmail: sanitizeEmail(lead.agentEmail),
+      status: lead.status === 'converted' ? 'converted' : 'trial',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `leads/${id}`);
+  }
+}
+
+export async function cloudUpdateLeadStatus(
+  leadId: string,
+  status: 'trial' | 'converted'
+): Promise<void> {
+  if (!db) return;
+  const firestore = db;
+  const id = sanitizeId(leadId, 'lead');
+  try {
+    await updateDoc(doc(firestore, 'leads', id), {
+      status,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `leads/${id}`);
+  }
+}
+
+export async function cloudCreateStudentSubscription(
+  user: User,
+  sub: StudentSubscription
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(sub.id, 'ss');
+  try {
+    await setDoc(doc(firestore, 'studentSubscriptions', id), {
+      id,
+      workspaceId: WORKSPACE_ID,
+      ownerUid: sanitizeId(user.uid, 'u'),
+      subscriberName: (sub.subscriberName.trim() || 'Student').slice(0, 80),
+      subscriberEmail: sanitizeEmail(sub.subscriberEmail),
+      subscriberPhone: sub.subscriberPhone.trim().slice(0, 40),
+      planType: 'yearly',
+      startDate: sanitizeDate(sub.startDate),
+      expiryDate: sanitizeDate(sub.expiryDate),
+      amountPaid: clamp(sub.amountPaid, 0, 100000),
+      discountApplied: clamp(sub.discountApplied, 0, 10000),
+      paymentMethod: ['upi', 'card', 'voucher'].includes(sub.paymentMethod)
+        ? sub.paymentMethod
+        : 'upi',
+      referralCode: sub.referralCode.trim().toUpperCase().slice(0, 32),
+      attributedAgentId: sub.attributedAgentId.trim().slice(0, 128),
+      agentEmail: sanitizeEmail(sub.agentEmail),
+      voucherCode: sub.voucherCode.trim().toUpperCase().slice(0, 64),
+      commissionAmount: clamp(sub.commissionAmount, 0, 10000),
+      status: ['active', 'expired', 'suspended'].includes(sub.status)
+        ? sub.status
+        : 'active',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(
+      error,
+      OperationType.CREATE,
+      `studentSubscriptions/${id}`
+    );
+  }
+}
+
+export async function cloudCreatePayoutRequest(
+  user: User,
+  payout: PayoutRequest
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(payout.id, 'pay');
+  try {
+    await setDoc(doc(firestore, 'payoutRequests', id), {
+      id,
+      workspaceId: WORKSPACE_ID,
+      ownerUid: sanitizeId(user.uid, 'u'),
+      agentId: sanitizeId(payout.agentId, 'ag'),
+      agentEmail: sanitizeEmail(payout.agentEmail),
+      agentName: (payout.agentName.trim() || 'Agent').slice(0, 80),
+      upiId: payout.upiId.trim().slice(0, 100),
+      amount: clamp(payout.amount, 500, 1000000),
+      status: 'pending',
+      utrNumber: '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      paidAt: '',
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `payoutRequests/${id}`);
+  }
+}
+
+export async function cloudMarkPayoutPaid(
+  payoutId: string,
+  utrNumber: string,
+  paidAt: string
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(payoutId, 'pay');
+  try {
+    await updateDoc(doc(firestore, 'payoutRequests', id), {
+      status: 'paid',
+      utrNumber: utrNumber.trim().slice(0, 80),
+      paidAt: paidAt.trim().slice(0, 32),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `payoutRequests/${id}`);
+  }
+}
+
+export async function cloudCreateOfflineVoucher(
+  user: User,
+  voucher: OfflineVoucher
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(voucher.id, 'GMATHS');
+  try {
+    await setDoc(doc(firestore, 'vouchers', id), {
+      id,
+      code: voucher.code.trim().toUpperCase().slice(0, 64),
+      workspaceId: WORKSPACE_ID,
+      ownerUid: sanitizeId(user.uid, 'u'),
+      agentId: voucher.agentId.trim().slice(0, 128),
+      agentEmail: sanitizeEmail(voucher.agentEmail),
+      agentName: voucher.agentName.trim().slice(0, 80),
+      planAmount: clamp(voucher.planAmount, 0, 100000),
+      status: 'unused',
+      redeemedByUid: '',
+      redeemedByEmail: '',
+      createdAt: serverTimestamp(),
+      redeemedAt: '',
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `vouchers/${id}`);
+  }
+}
+
+export async function cloudLookupAndRedeemVoucher(
+  user: User,
+  rawCode: string
+): Promise<OfflineVoucher> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const codeClean = rawCode.trim().toUpperCase().replace(/[^A-Z0-9_\-]/g, '');
+  if (codeClean.length < 4) {
+    throw new Error('Enter a valid activation voucher code.');
+  }
+  const ref = doc(firestore, 'vouchers', codeClean);
+  let snap;
+  try {
+    snap = await getDoc(ref);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `vouchers/${codeClean}`);
+  }
+  if (!snap || !snap.exists()) {
+    throw new Error('Voucher code not found. Verify spelling and try again.');
+  }
+  const existing = mapVoucherDoc(snap.id, snap.data(), user.uid);
+  if (existing.status === 'redeemed') {
+    throw new Error('This offline voucher code has already been redeemed.');
+  }
+
+  const redeemedAt = todayIsoDate();
+  const redeemedEmail = sanitizeEmail(user.email ?? '');
+  try {
+    await updateDoc(ref, {
+      status: 'redeemed',
+      redeemedByUid: sanitizeId(user.uid, 'u'),
+      redeemedByEmail: redeemedEmail,
+      redeemedAt,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `vouchers/${codeClean}`);
+  }
+  return {
+    ...existing,
+    status: 'redeemed',
+    redeemedByUid: user.uid,
+    redeemedByEmail: redeemedEmail,
+    redeemedAt,
+  };
+}
+
+export async function cloudSaveAppConfig(config: {
+  dailyChallengeSeed: string;
+  announcementEnabled: boolean;
+  announcementText: string;
+}): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  try {
+    await setDoc(doc(firestore, 'appConfig', 'global'), {
+      id: 'global',
+      dailyChallengeSeed:
+        config.dailyChallengeSeed.trim().slice(0, 64) ||
+        DEFAULT_APP_CONFIG.dailyChallengeSeed,
+      announcementEnabled: Boolean(config.announcementEnabled),
+      announcementText: config.announcementText.trim().slice(0, 240),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, 'appConfig/global');
   }
 }

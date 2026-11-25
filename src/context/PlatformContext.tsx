@@ -10,46 +10,103 @@ import { useFirebase } from './FirebaseContext';
 import {
   cloudCreateAgent,
   cloudCreateChild,
+  cloudCreateOfflineVoucher,
   cloudCreateParent,
+  cloudCreatePayoutRequest,
   cloudCreatePracticeSession,
+  cloudCreateStudentSubscription,
   cloudCreateSubscription,
+  cloudCreateTrialLead,
+  cloudLookupAndRedeemVoucher,
+  cloudMarkPayoutPaid,
+  cloudSaveAppConfig,
   cloudUpdateAgent,
+  cloudUpdateAgentSelfProfile,
+  cloudUpdateChildLeaderboardVisibility,
   cloudUpdateChildScoreAndLeaderboard,
+  cloudUpdateLeadStatus,
   cloudUpdateSubscription,
+  lookupReferralCodeCloud,
   resolveUserRoleFromFirestore,
+  subscribeAppConfig,
   subscribeChildChampions,
   subscribePlatformWorkspace,
 } from '../lib/platformStorage';
+import { cloudUpdateLeaderboardModeration } from '../lib/storage';
 import {
+  getFreeAdaptiveUsedCount,
+  incrementFreeAdaptiveUsedCount,
+  loadCustomPresets,
+  loadLocalGrowthState,
+  saveCustomPresetItem,
+  deleteCustomPresetItem,
+  saveLocalGrowthState,
+} from '../lib/localGrowthStore';
+import {
+  ANNUAL_PLAN_PRICE_INR,
+  AgentApprovalStatus,
   AgentProfile,
+  AppGlobalConfig,
   BOOTSTRAPPED_ADMIN_EMAIL,
   ChildLeaderboardEntry,
   ChildOnboardingInput,
   ChildProfile,
+  DEFAULT_APP_CONFIG,
+  OfflineVoucher,
+  PAYOUT_MINIMUM_INR,
   ParentProfile,
   PaymentMethod,
+  PayoutRequest,
   PlatformRoute,
   PracticeSession,
+  REFERRAL_DISCOUNT_INR,
+  ReferralCodePublic,
   RoleSession,
+  StudentSubscription,
   SubscriptionRecord,
   SubscriptionStatus,
+  TrialLead,
   WORKSPACE_ID,
   WeakTopic,
   addOneYearIso,
+  computeAgentCommissionSummary,
   evaluateSubscriptionState,
+  getAgentApprovalStatus,
+  getCommissionForNextConversion,
+  isSameCalendarMonth,
+  isStudentSubscriptionActive,
   todayIsoDate,
 } from '../types/platform';
 import {
   ConcreteOperation,
+  CustomPreset,
+  DrillConfig,
   SessionRecord,
   normalizeIndianClass,
 } from '../types/math';
 import { hashSecret, verifySecret } from '../utils/crypto';
+import {
+  captureReferralFromCurrentUrl,
+  hashContactForAttribution,
+  loadStickyReferral,
+  normalizeEmailForMatch,
+  normalizePhoneForMatch,
+  saveStickyReferral,
+} from '../utils/referral';
 
 const ACTIVE_CHILD_SESSION_KEY = 'gmaths_active_child_session_v1';
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function makeVoucherCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let part = '';
+  for (let i = 0; i < 6; i += 1) {
+    part += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `GM-${part}`;
 }
 
 function loadActiveChildSession(): RoleSession | null {
@@ -81,6 +138,17 @@ function saveActiveChildSession(session: RoleSession | null): void {
   }
 }
 
+export interface PromoValidationResult {
+  valid: boolean;
+  code: string;
+  discountAmount: number;
+  agentId: string;
+  agentName: string;
+  agentEmail?: string;
+  isSelfReferral: boolean;
+  message: string;
+}
+
 export interface ChildStatsSummary {
   totalScore: number;
   totalSessions: number;
@@ -103,19 +171,68 @@ interface PlatformContextValue {
   children: ChildProfile[];
   subscriptions: SubscriptionRecord[];
   practiceSessions: PracticeSession[];
+  leads: TrialLead[];
+  studentSubscriptions: StudentSubscription[];
+  payoutRequests: PayoutRequest[];
+  vouchers: OfflineVoucher[];
+  appConfig: AppGlobalConfig;
+
   topChampions: ChildLeaderboardEntry[];
   topChampionsLoading: boolean;
   topChampionsError: string | null;
   childLeaderboard: ChildLeaderboardEntry[];
   platformLoading: boolean;
   roleSession: RoleSession | null;
-  /** Emitted after explicit Google Sign-In so App routes to the assigned dashboard */
   autoRouteEvent: { seq: number; route: PlatformRoute } | null;
   roleResolveNotice: string | null;
   platformError: string | null;
   isGoogleAdmin: boolean;
   dismissPlatformError: () => void;
   dismissRoleResolveNotice: () => void;
+
+  // Paywall, Presets & Sticky Referral
+  capturedReferralCode: string;
+  isProSubscriber: boolean;
+  myStudentSubscription: StudentSubscription | undefined;
+  freeAdaptiveUsedCount: number;
+  markFreeAdaptiveUsed: () => void;
+  customPresets: CustomPreset[];
+  saveCustomPreset: (name: string, config: DrillConfig) => void;
+  deleteCustomPreset: (presetId: string) => void;
+  isCheckoutOpen: boolean;
+  checkoutInitialTab: 'plan' | 'voucher';
+  openCheckoutModal: (tab?: 'plan' | 'voucher') => void;
+  closeCheckoutModal: () => void;
+  validatePromoCode: (
+    rawCode: string,
+    buyerEmail?: string,
+    buyerPhone?: string
+  ) => Promise<PromoValidationResult>;
+  completeAnnualCheckout: (input: {
+    subscriberName: string;
+    subscriberEmail: string;
+    subscriberPhone: string;
+    paymentMethod: 'upi' | 'card';
+    promoCode?: string;
+  }) => Promise<{
+    ok: boolean;
+    error?: string;
+    subscription?: StudentSubscription;
+  }>;
+  redeemOfflineVoucher: (input: {
+    voucherCode: string;
+    subscriberName?: string;
+    subscriberPhone?: string;
+  }) => Promise<{
+    ok: boolean;
+    error?: string;
+    subscription?: StudentSubscription;
+  }>;
+  recordTrialLeadIfReferred: (
+    name: string,
+    email: string,
+    phone?: string
+  ) => Promise<void>;
 
   // Role Authentication (Google-first + Cloud Firestore verified)
   signInAndRouteWithGoogle: () => Promise<{ ok: boolean; error?: string }>;
@@ -128,6 +245,22 @@ interface PlatformContextValue {
     contact: string,
     passcode: string
   ) => Promise<{ ok: boolean; error?: string }>;
+  registerSalesAgent: (input: {
+    name: string;
+    phone: string;
+    city: string;
+    upiId: string;
+    agentCode?: string;
+  }) => Promise<{ ok: boolean; error?: string; agent?: AgentProfile }>;
+  updateAgentSelfProfile: (
+    agentId: string,
+    patch: { name: string; phone: string; city: string; upiId: string }
+  ) => Promise<{ ok: boolean; error?: string }>;
+  requestAgentPayout: (
+    agentId: string,
+    amount: number,
+    upiId: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   switchToChildMode: (childId: string) => {
     ok: boolean;
     error?: string;
@@ -136,14 +269,17 @@ interface PlatformContextValue {
   exitChildModeToParent: () => void;
   logoutRole: () => Promise<void>;
 
-  // Admin Operations (direct Cloud Firestore writes)
+  // Admin Operations
   createAgent: (input: {
     agentCode: string;
     name: string;
     phone: string;
     email: string;
     assignedArea: string;
+    city?: string;
+    upiId?: string;
     commissionRate: number;
+    commissionPerConversion?: number;
     defaultYearlyFee: number;
     passcode: string;
   }) => Promise<{ ok: boolean; error?: string; agent?: AgentProfile }>;
@@ -155,19 +291,49 @@ interface PlatformContextValue {
       phone: string;
       email: string;
       assignedArea: string;
+      city?: string;
+      upiId?: string;
+      approvalStatus?: AgentApprovalStatus;
       commissionRate: number;
+      commissionPerConversion?: number;
       defaultYearlyFee: number;
       newPasscode?: string;
       isActive: boolean;
     }
   ) => Promise<{ ok: boolean; error?: string }>;
   toggleAgentActive: (agentId: string) => Promise<void>;
+  setAgentApprovalStatus: (
+    agentId: string,
+    status: AgentApprovalStatus,
+    commissionPerConversion?: number,
+    commissionRate?: number
+  ) => Promise<{ ok: boolean; error?: string }>;
   adminOverrideSubscription: (
     parentId: string,
     action: 'activate' | 'extend_year' | 'suspend'
   ) => Promise<{ ok: boolean; error?: string }>;
+  markPayoutPaid: (
+    payoutId: string,
+    utrNumber: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  generateOfflineVoucher: (
+    agentId?: string
+  ) => Promise<{ ok: boolean; error?: string; voucher?: OfflineVoucher }>;
+  updateAppConfig: (patch: {
+    dailyChallengeSeed: string;
+    announcementEnabled: boolean;
+    announcementText: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  moderateLeaderboardEntry: (
+    entryId: string,
+    patch: { isHidden?: boolean; isFlagged?: boolean; flagReason?: string }
+  ) => Promise<{ ok: boolean; error?: string }>;
+  moderateChildChampion: (
+    childId: string,
+    isHidden: boolean
+  ) => Promise<{ ok: boolean; error?: string }>;
 
-  // Agent Operations (direct Cloud Firestore writes)
+  // Agent Operations
   onboardParentAccount: (input: {
     agentId: string;
     parentName: string;
@@ -194,7 +360,7 @@ interface PlatformContextValue {
     startDate: string;
   }) => Promise<{ ok: boolean; error?: string }>;
 
-  // Child Practice Tracking (direct Cloud Firestore + Public Top 3 Leaderboard sync)
+  // Child Practice Tracking
   recordChildPractice: (
     childId: string,
     session: SessionRecord
@@ -227,15 +393,22 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     signOutUser,
   } = useFirebase();
 
-  // 100% Cloud Firestore live state (zero localStorage data fallback)
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [parents, setParents] = useState<ParentProfile[]>([]);
   const [children, setChildren] = useState<ChildProfile[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
   const [practiceSessions, setPracticeSessions] = useState<PracticeSession[]>([]);
+  const [leads, setLeads] = useState<TrialLead[]>([]);
+  const [studentSubscriptions, setStudentSubscriptions] = useState<
+    StudentSubscription[]
+  >([]);
+  const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
+  const [vouchers, setVouchers] = useState<OfflineVoucher[]>([]);
+  const [appConfig, setAppConfig] = useState<AppGlobalConfig>(
+    DEFAULT_APP_CONFIG
+  );
   const [platformLoading, setPlatformLoading] = useState<boolean>(false);
 
-  // Public Top 3 & Top 50 Children Champions from /childLeaderboard
   const [topChampions, setTopChampions] = useState<ChildLeaderboardEntry[]>([]);
   const [topChampionsLoading, setTopChampionsLoading] = useState<boolean>(true);
   const [topChampionsError, setTopChampionsError] = useState<string | null>(null);
@@ -253,6 +426,37 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   const [roleResolveNotice, setRoleResolveNotice] = useState<string | null>(null);
   const [platformError, setPlatformError] = useState<string | null>(null);
 
+  // Sticky Referral & Checkout Modal state
+  const [capturedReferralCode, setCapturedReferralCode] = useState<string>(() =>
+    captureReferralFromCurrentUrl() || loadStickyReferral()?.code || ''
+  );
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
+  const [checkoutInitialTab, setCheckoutInitialTab] = useState<'plan' | 'voucher'>('plan');
+
+  const scopeKey = user?.uid || roleSession?.accountId || 'guest';
+  const [customPresets, setCustomPresets] = useState<CustomPreset[]>(() =>
+    loadCustomPresets(scopeKey)
+  );
+  const [freeAdaptiveUsedCount, setFreeAdaptiveUsedCount] = useState<number>(() =>
+    getFreeAdaptiveUsedCount(scopeKey)
+  );
+
+  useEffect(() => {
+    setCustomPresets(loadCustomPresets(scopeKey));
+    setFreeAdaptiveUsedCount(getFreeAdaptiveUsedCount(scopeKey));
+  }, [scopeKey]);
+
+  // Capture ?ref= on mount or hash change
+  useEffect(() => {
+    const syncRef = () => {
+      const found = captureReferralFromCurrentUrl();
+      if (found) setCapturedReferralCode(found);
+    };
+    syncRef();
+    window.addEventListener('hashchange', syncRef);
+    return () => window.removeEventListener('hashchange', syncRef);
+  }, []);
+
   const isGoogleAdmin = Boolean(
     user &&
       user.emailVerified &&
@@ -264,9 +468,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     saveActiveChildSession(next);
   }, []);
 
-  // 1. Public real-time Top 3 Champions + full Children Leaderboard (works even before sign-in)
+  // 1. Public real-time Top Champions & AppGlobalConfig
   useEffect(() => {
     if (!isConfigured) {
+      const localState = loadLocalGrowthState();
+      setAppConfig(localState.appConfig);
+      setAgents(localState.agents);
+      setLeads(localState.leads);
+      setStudentSubscriptions(localState.studentSubscriptions);
+      setPayoutRequests(localState.payoutRequests);
+      setVouchers(localState.vouchers);
       setTopChampions([]);
       setChildLeaderboard([]);
       setTopChampionsLoading(false);
@@ -274,10 +485,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     setTopChampionsLoading(true);
+    const unsubConfig = subscribeAppConfig(setAppConfig);
     const unsubTop3 = subscribeChildChampions(
-      3,
+      25,
       (items) => {
-        setTopChampions(items);
+        const visible = items.filter((e) => !e.isHidden);
+        setTopChampions(visible.slice(0, 3));
         setTopChampionsLoading(false);
         setTopChampionsError(null);
       },
@@ -293,25 +506,34 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         setChildLeaderboard(items);
       },
       () => {
-        // Already surfaced via top3 error if offline
+        // Surfaced via top3 listener
       }
     );
 
     return () => {
+      unsubConfig();
       unsubTop3();
       unsubAll();
     };
   }, [isConfigured]);
 
-  // 2. Real-time Cloud Firestore workspace listeners scoped to verified Google user
+  // 2. Real-time Cloud Firestore workspace listeners
   useEffect(() => {
     if (!authReady) return;
-    if (!user || !isConfigured) {
+    if (!isConfigured) {
+      setPlatformLoading(false);
+      return;
+    }
+    if (!user) {
       setAgents([]);
       setParents([]);
       setChildren([]);
       setSubscriptions([]);
       setPracticeSessions([]);
+      setLeads([]);
+      setStudentSubscriptions([]);
+      setPayoutRequests([]);
+      setVouchers([]);
       setPlatformLoading(false);
       updateRoleSession(null);
       return;
@@ -324,6 +546,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       onChildren: setChildren,
       onSubscriptions: setSubscriptions,
       onPracticeSessions: setPracticeSessions,
+      onLeads: setLeads,
+      onStudentSubscriptions: setStudentSubscriptions,
+      onPayoutRequests: setPayoutRequests,
+      onVouchers: setVouchers,
       onReady: () => setPlatformLoading(false),
       onError: (err) => {
         setPlatformError(err.message);
@@ -334,7 +560,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => unsub();
   }, [authReady, user, isConfigured, updateRoleSession]);
 
-  // 3. Automatically resolve user's verified role from Firestore on session restore or explicit Google Sign-In
+  // 3. Automatically resolve verified role from Firestore
   useEffect(() => {
     if (!authReady || !user || !isConfigured) return;
 
@@ -344,14 +570,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         if (cancelled) return;
         if (resolved.inactiveAgent) {
           setRoleResolveNotice(
-            'Your Agent account is currently deactivated by Admin.'
+            'Your Agent account is currently suspended by Admin.'
           );
           return;
         }
         if (resolved.session) {
           setRoleResolveNotice(null);
           setRoleSession((current) => {
-            // Preserve active one-tap Child session belonging to this Parent
             if (
               current?.role === 'child' &&
               resolved.session?.role === 'parent' &&
@@ -370,7 +595,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         } else if (googleSignInSeq > 0) {
           setRoleResolveNotice(
-            `Signed in as ${user.email}. No Admin, Agent, or Parent portal is linked to this email yet — you can practice freely on the Home screen or ask your Agent/Admin to add this email.`
+            `Signed in as ${user.email}. No Admin, Agent, or Parent portal is linked to this email yet — you can practice freely on the Home screen or sign up as a Sales Partner.`
           );
         }
       })
@@ -423,6 +648,43 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     (parentId: string) => getSubscriptionHistoryForParent(parentId)[0],
     [getSubscriptionHistoryForParent]
   );
+
+  // Active Pro Subscription calculation (covers direct student sub, parent family plan, or Admin)
+  const myStudentSubscription = useMemo(() => {
+    const emailLower = user?.email ? normalizeEmailForMatch(user.email) : '';
+    return studentSubscriptions.find((sub) => {
+      if (!isStudentSubscriptionActive(sub)) return false;
+      if (!isConfigured) return true;
+      if (!user) return false;
+      return (
+        sub.ownerUid === user.uid ||
+        (emailLower && sub.subscriberEmail === emailLower)
+      );
+    });
+  }, [isConfigured, studentSubscriptions, user]);
+
+  const isProSubscriber = useMemo(() => {
+    if (isGoogleAdmin) return true;
+    if (myStudentSubscription) return true;
+    if (roleSession?.role === 'child') {
+      const ch = children.find((c) => c.id === roleSession.accountId);
+      if (ch) {
+        const sub = getLatestSubscriptionForParent(ch.parentId);
+        if (evaluateSubscriptionState(sub).canPractice) return true;
+      }
+    }
+    if (roleSession?.role === 'parent') {
+      const sub = getLatestSubscriptionForParent(roleSession.accountId);
+      if (evaluateSubscriptionState(sub).canPractice) return true;
+    }
+    return false;
+  }, [
+    children,
+    getLatestSubscriptionForParent,
+    isGoogleAdmin,
+    myStudentSubscription,
+    roleSession,
+  ]);
 
   const getChildStats = useCallback(
     (childId: string): ChildStatsSummary => {
@@ -507,7 +769,508 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   // ---------------------------------------------------------------------------
-  // Authentication & One-Tap Child Switching
+  // Presets, Paywall & Referral Validation
+  // ---------------------------------------------------------------------------
+
+  const saveCustomPreset = useCallback(
+    (name: string, cfg: DrillConfig) => {
+      const cleanName = name.trim().slice(0, 32) || 'Custom Drill';
+      const preset: CustomPreset = {
+        id: makeId('preset'),
+        name: cleanName,
+        mode: cfg.mode,
+        difficulty: cfg.difficulty,
+        indianClass: cfg.indianClass,
+        sessionType: cfg.sessionType,
+        durationSec: cfg.durationSec,
+        allowNegatives: cfg.allowNegatives,
+        autoSubmit: cfg.autoSubmit,
+        createdAtMs: Date.now(),
+      };
+      setCustomPresets(saveCustomPresetItem(scopeKey, preset));
+    },
+    [scopeKey]
+  );
+
+  const deleteCustomPreset = useCallback(
+    (presetId: string) => {
+      setCustomPresets(deleteCustomPresetItem(scopeKey, presetId));
+    },
+    [scopeKey]
+  );
+
+  const markFreeAdaptiveUsed = useCallback(() => {
+    setFreeAdaptiveUsedCount(incrementFreeAdaptiveUsedCount(scopeKey));
+  }, [scopeKey]);
+
+  const openCheckoutModal = useCallback((tab: 'plan' | 'voucher' = 'plan') => {
+    setCheckoutInitialTab(tab);
+    setIsCheckoutOpen(true);
+  }, []);
+
+  const closeCheckoutModal = useCallback(() => {
+    setIsCheckoutOpen(false);
+  }, []);
+
+  const validatePromoCode = useCallback(
+    async (
+      rawCode: string,
+      buyerEmail?: string,
+      buyerPhone?: string
+    ): Promise<PromoValidationResult> => {
+      const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9_\-]/g, '');
+      if (code.length < 2) {
+        return {
+          valid: false,
+          code,
+          discountAmount: 0,
+          agentId: '',
+          agentName: '',
+          isSelfReferral: false,
+          message: 'Enter a valid referral or promo code.',
+        };
+      }
+
+      let refDoc: ReferralCodePublic | null = null;
+      if (isConfigured) {
+        refDoc = await lookupReferralCodeCloud(code);
+      } else {
+        const localState = loadLocalGrowthState();
+        refDoc = localState.referralCodes[code] ?? null;
+      }
+
+      // Also check already-loaded agents list in case offline or just created
+      const localAgentMatch = agents.find(
+        (a) => a.agentCode.toUpperCase() === code
+      );
+      if (!refDoc && localAgentMatch) {
+        refDoc = {
+          code,
+          workspaceId: WORKSPACE_ID,
+          agentId: localAgentMatch.id,
+          agentName: localAgentMatch.name,
+          isActive: localAgentMatch.isActive,
+          approvalStatus: getAgentApprovalStatus(localAgentMatch),
+          emailHash: await hashContactForAttribution(localAgentMatch.email),
+          phoneHash: await hashContactForAttribution(localAgentMatch.phone),
+          updatedAtMs: localAgentMatch.updatedAtMs,
+        };
+      }
+
+      if (!refDoc) {
+        return {
+          valid: false,
+          code,
+          discountAmount: 0,
+          agentId: '',
+          agentName: '',
+          isSelfReferral: false,
+          message: `Promo code "${code}" was not found.`,
+        };
+      }
+
+      if (!refDoc.isActive || refDoc.approvalStatus !== 'approved') {
+        return {
+          valid: false,
+          code,
+          discountAmount: 0,
+          agentId: refDoc.agentId,
+          agentName: refDoc.agentName,
+          isSelfReferral: false,
+          message: `Partner code "${code}" is currently pending Admin approval.`,
+        };
+      }
+
+      // Self-referral check against buyer email/phone and current Firebase UID
+      const normEmail = normalizeEmailForMatch(
+        buyerEmail || user?.email || ''
+      );
+      const normPhone = normalizePhoneForMatch(buyerPhone || '');
+      const [buyerEmailHash, buyerPhoneHash] = await Promise.all([
+        hashContactForAttribution(normEmail),
+        hashContactForAttribution(normPhone),
+      ]);
+
+      const sameUid = Boolean(
+        user && localAgentMatch && localAgentMatch.ownerUid === user.uid
+      );
+      const sameEmail = Boolean(
+        normEmail &&
+          ((refDoc.emailHash && buyerEmailHash === refDoc.emailHash) ||
+            (localAgentMatch &&
+              normalizeEmailForMatch(localAgentMatch.email) === normEmail))
+      );
+      const samePhone = Boolean(
+        normPhone &&
+          ((refDoc.phoneHash && buyerPhoneHash === refDoc.phoneHash) ||
+            (localAgentMatch &&
+              normalizePhoneForMatch(localAgentMatch.phone) === normPhone))
+      );
+
+      if (sameUid || sameEmail || samePhone) {
+        return {
+          valid: false,
+          code,
+          discountAmount: 0,
+          agentId: '',
+          agentName: refDoc.agentName,
+          isSelfReferral: true,
+          message:
+            'Self-referral detected: agents cannot apply their own promo code or earn commission on their own purchase.',
+        };
+      }
+
+      return {
+        valid: true,
+        code: refDoc.code,
+        discountAmount: REFERRAL_DISCOUNT_INR,
+        agentId: refDoc.agentId,
+        agentName: refDoc.agentName,
+        agentEmail: localAgentMatch?.email,
+        isSelfReferral: false,
+        message: `₹${REFERRAL_DISCOUNT_INR} student discount applied via partner ${refDoc.agentName}.`,
+      };
+    },
+    [agents, isConfigured, user]
+  );
+
+  const completeAnnualCheckout = useCallback(
+    async (input: {
+      subscriberName: string;
+      subscriberEmail: string;
+      subscriberPhone: string;
+      paymentMethod: 'upi' | 'card';
+      promoCode?: string;
+    }) => {
+      const nameClean = input.subscriberName.trim();
+      const emailClean = normalizeEmailForMatch(
+        input.subscriberEmail || user?.email || ''
+      );
+      const phoneClean = input.subscriberPhone.trim();
+
+      if (!nameClean || !emailClean.includes('@')) {
+        return {
+          ok: false,
+          error: 'Enter your name and a valid email address.',
+        };
+      }
+
+      let promoResult: PromoValidationResult | null = null;
+      if (input.promoCode?.trim()) {
+        promoResult = await validatePromoCode(
+          input.promoCode,
+          emailClean,
+          phoneClean
+        );
+        if (promoResult.isSelfReferral) {
+          return { ok: false, error: promoResult.message };
+        }
+      }
+
+      const discountApplied =
+        promoResult && promoResult.valid ? promoResult.discountAmount : 0;
+      const amountPaid = Math.max(0, ANNUAL_PLAN_PRICE_INR - discountApplied);
+      const attributedAgentId =
+        promoResult && promoResult.valid ? promoResult.agentId : '';
+      const attributedAgent = attributedAgentId
+        ? agents.find((a) => a.id === attributedAgentId)
+        : undefined;
+      const monthlyAgentConversions = attributedAgentId
+        ? studentSubscriptions.filter(
+            (s) =>
+              s.attributedAgentId === attributedAgentId &&
+              s.status === 'active' &&
+              isSameCalendarMonth(s.createdAtMs)
+          ).length +
+          subscriptions.filter(
+            (s) =>
+              s.collectedByAgentId === attributedAgentId &&
+              s.status === 'active' &&
+              isSameCalendarMonth(s.createdAtMs)
+          ).length
+        : 0;
+      const commissionAmount = attributedAgentId
+        ? getCommissionForNextConversion(
+            attributedAgent ?? { commissionPerConversion: 0 },
+            monthlyAgentConversions
+          )
+        : 0;
+
+      const today = todayIsoDate();
+      const now = Date.now();
+      const sub: StudentSubscription = {
+        id: makeId('ss'),
+        workspaceId: WORKSPACE_ID,
+        ownerUid: user?.uid || 'local_user',
+        subscriberName: nameClean,
+        subscriberEmail: emailClean,
+        subscriberPhone: phoneClean,
+        planType: 'yearly',
+        startDate: today,
+        expiryDate: addOneYearIso(today),
+        amountPaid,
+        discountApplied,
+        paymentMethod: input.paymentMethod,
+        referralCode: promoResult && promoResult.valid ? promoResult.code : '',
+        attributedAgentId,
+        agentEmail: attributedAgent?.email || promoResult?.agentEmail || '',
+        voucherCode: '',
+        commissionAmount,
+        status: 'active',
+        createdAtMs: now,
+        updatedAtMs: now,
+      };
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.studentSubscriptions = [sub, ...local.studentSubscriptions];
+        saveLocalGrowthState(local);
+        setStudentSubscriptions(local.studentSubscriptions);
+        return { ok: true, subscription: sub };
+      }
+
+      if (!user) {
+        return {
+          ok: false,
+          error: 'Sign in with Google first to activate and sync your Pro plan.',
+        };
+      }
+
+      try {
+        await cloudCreateStudentSubscription(user, sub);
+        // Mark any matching trial lead as converted
+        const matchingLead = leads.find(
+          (l) =>
+            l.status === 'trial' &&
+            (l.ownerUid === user.uid || (emailClean && l.email === emailClean))
+        );
+        if (matchingLead) {
+          await cloudUpdateLeadStatus(matchingLead.id, 'converted').catch(
+            () => {}
+          );
+        }
+        if (promoResult?.valid) {
+          saveStickyReferral(promoResult.code);
+          setCapturedReferralCode(promoResult.code);
+        }
+        return { ok: true, subscription: sub };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: msg };
+      }
+    },
+    [
+      agents,
+      isConfigured,
+      leads,
+      studentSubscriptions,
+      subscriptions,
+      user,
+      validatePromoCode,
+    ]
+  );
+
+  const redeemOfflineVoucher = useCallback(
+    async (input: {
+      voucherCode: string;
+      subscriberName?: string;
+      subscriberPhone?: string;
+    }) => {
+      const codeClean = input.voucherCode
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_\-]/g, '');
+      if (codeClean.length < 4) {
+        return { ok: false, error: 'Enter a valid activation voucher code.' };
+      }
+
+      const emailClean = normalizeEmailForMatch(user?.email || '');
+      const nameClean = (
+        input.subscriberName?.trim() ||
+        user?.displayName ||
+        emailClean.split('@')[0] ||
+        'Student'
+      ).slice(0, 80);
+
+      let redeemedVoucher: OfflineVoucher;
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        const found = local.vouchers.find((v) => v.code === codeClean);
+        if (!found) {
+          return { ok: false, error: 'Offline voucher code not found.' };
+        }
+        if (found.status === 'redeemed') {
+          return {
+            ok: false,
+            error: 'This offline voucher code has already been redeemed.',
+          };
+        }
+        found.status = 'redeemed';
+        found.redeemedByUid = user?.uid || 'local_user';
+        found.redeemedByEmail = emailClean;
+        found.redeemedAt = todayIsoDate();
+        saveLocalGrowthState(local);
+        setVouchers([...local.vouchers]);
+        redeemedVoucher = found;
+      } else {
+        if (!user) {
+          return {
+            ok: false,
+            error: 'Sign in with Google first to redeem an activation voucher.',
+          };
+        }
+        try {
+          redeemedVoucher = await cloudLookupAndRedeemVoucher(user, codeClean);
+        } catch (err) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
+
+      // Check self-referral guard if voucher is attributed to an agent
+      const attrAgentId = redeemedVoucher.agentId;
+      const isSelfVoucher = Boolean(
+        attrAgentId &&
+          ((user && redeemedVoucher.agentEmail === emailClean && emailClean) ||
+            (agents.find((a) => a.id === attrAgentId)?.ownerUid === user?.uid))
+      );
+
+      const effectiveAgentId = isSelfVoucher ? '' : attrAgentId;
+      const attrAgent = effectiveAgentId
+        ? agents.find((a) => a.id === effectiveAgentId)
+        : undefined;
+      const monthlyAttrConversions = effectiveAgentId
+        ? studentSubscriptions.filter(
+            (s) =>
+              s.attributedAgentId === effectiveAgentId &&
+              s.status === 'active' &&
+              isSameCalendarMonth(s.createdAtMs)
+          ).length +
+          subscriptions.filter(
+            (s) =>
+              s.collectedByAgentId === effectiveAgentId &&
+              s.status === 'active' &&
+              isSameCalendarMonth(s.createdAtMs)
+          ).length
+        : 0;
+      const commissionAmount = effectiveAgentId
+        ? getCommissionForNextConversion(
+            attrAgent ?? { commissionPerConversion: 0 },
+            monthlyAttrConversions
+          )
+        : 0;
+
+      const today = todayIsoDate();
+      const now = Date.now();
+      const sub: StudentSubscription = {
+        id: makeId('ss'),
+        workspaceId: WORKSPACE_ID,
+        ownerUid: user?.uid || 'local_user',
+        subscriberName: nameClean,
+        subscriberEmail: emailClean,
+        subscriberPhone: input.subscriberPhone?.trim() || '',
+        planType: 'yearly',
+        startDate: today,
+        expiryDate: addOneYearIso(today),
+        amountPaid: redeemedVoucher.planAmount || ANNUAL_PLAN_PRICE_INR,
+        discountApplied: 0,
+        paymentMethod: 'voucher',
+        referralCode: attrAgent?.agentCode || '',
+        attributedAgentId: effectiveAgentId,
+        agentEmail: isSelfVoucher ? '' : redeemedVoucher.agentEmail,
+        voucherCode: redeemedVoucher.code,
+        commissionAmount,
+        status: 'active',
+        createdAtMs: now,
+        updatedAtMs: now,
+      };
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.studentSubscriptions = [sub, ...local.studentSubscriptions];
+        saveLocalGrowthState(local);
+        setStudentSubscriptions(local.studentSubscriptions);
+        return { ok: true, subscription: sub };
+      }
+
+      if (!user) {
+        return { ok: false, error: 'Sign in required.' };
+      }
+      try {
+        await cloudCreateStudentSubscription(user, sub);
+        return { ok: true, subscription: sub };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [agents, isConfigured, studentSubscriptions, subscriptions, user]
+  );
+
+  const recordTrialLeadIfReferred = useCallback(
+    async (name: string, email: string, phone = '') => {
+      if (!capturedReferralCode || !user) return;
+      const emailLower = normalizeEmailForMatch(email || user.email || '');
+      if (!emailLower) return;
+
+      const alreadyLogged = leads.some(
+        (l) =>
+          (l.ownerUid === user.uid || l.email === emailLower) &&
+          l.referralCode === capturedReferralCode
+      );
+      if (alreadyLogged) return;
+
+      const validation = await validatePromoCode(
+        capturedReferralCode,
+        emailLower,
+        phone
+      );
+      if (!validation.valid || validation.isSelfReferral || !validation.agentId) {
+        return;
+      }
+
+      const now = Date.now();
+      const lead: TrialLead = {
+        id: makeId('lead'),
+        workspaceId: WORKSPACE_ID,
+        ownerUid: user.uid,
+        name: name.trim() || emailLower.split('@')[0] || 'Student',
+        email: emailLower,
+        phone: phone.trim(),
+        referralCode: validation.code,
+        agentId: validation.agentId,
+        agentEmail: validation.agentEmail || '',
+        status: isProSubscriber ? 'converted' : 'trial',
+        createdAtMs: now,
+        updatedAtMs: now,
+      };
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.leads = [lead, ...local.leads];
+        saveLocalGrowthState(local);
+        setLeads(local.leads);
+        return;
+      }
+
+      await cloudCreateTrialLead(user, lead).catch(() => {});
+    },
+    [
+      capturedReferralCode,
+      isConfigured,
+      isProSubscriber,
+      leads,
+      user,
+      validatePromoCode,
+    ]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Authentication & Sales Agent Onboarding
   // ---------------------------------------------------------------------------
 
   const signInAndRouteWithGoogle = useCallback(async () => {
@@ -520,7 +1283,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       if (resolved.inactiveAgent) {
         return {
           ok: false,
-          error: 'Your Agent account has been deactivated by Admin.',
+          error: 'Your Agent account has been suspended by Admin.',
         };
       }
       if (resolved.session) {
@@ -541,6 +1304,236 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     setRoleResolveNotice(null);
     await signInWithGoogleRedirect();
   }, [signInWithGoogleRedirect]);
+
+  const registerSalesAgent = useCallback(
+    async (input: {
+      name: string;
+      phone: string;
+      city: string;
+      upiId: string;
+      agentCode?: string;
+    }) => {
+      if (!user) {
+        return {
+          ok: false,
+          error: 'Sign in with Google first to submit your Sales Partner profile.',
+        };
+      }
+      const nameClean = input.name.trim();
+      const phoneClean = input.phone.trim();
+      const cityClean = input.city.trim();
+      const upiClean = input.upiId.trim();
+      const emailClean = normalizeEmailForMatch(user.email || '');
+
+      if (!nameClean || !phoneClean || !cityClean || !upiClean) {
+        return {
+          ok: false,
+          error: 'Name, Phone, City, and UPI ID are all required.',
+        };
+      }
+      if (!upiClean.includes('@')) {
+        return {
+          ok: false,
+          error: 'Enter a valid UPI ID (e.g. name@okaxis or mobile@ybl).',
+        };
+      }
+
+      const existingOwn = agents.find((a) => a.email === emailClean);
+      if (existingOwn) {
+        updateRoleSession({
+          role: 'agent',
+          accountId: existingOwn.id,
+          displayName: existingOwn.name,
+        });
+        return { ok: true, agent: existingOwn };
+      }
+
+      const baseSlug = nameClean
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 4)
+        .padEnd(2, 'A');
+      const generatedCode =
+        input.agentCode
+          ?.trim()
+          .toUpperCase()
+          .replace(/[^A-Z0-9_\-]/g, '')
+          .slice(0, 12) ||
+        `${baseSlug}${Math.floor(100 + Math.random() * 900)}`;
+
+      const now = Date.now();
+      const passcodeHash = await hashSecret(`google_oauth_${user.uid}`);
+      const newAgent: AgentProfile = {
+        id: makeId('ag'),
+        workspaceId: WORKSPACE_ID,
+        ownerUid: user.uid,
+        agentCode: generatedCode,
+        name: nameClean,
+        phone: phoneClean,
+        email: emailClean,
+        assignedArea: cityClean,
+        city: cityClean,
+        upiId: upiClean,
+        approvalStatus: 'pending',
+        commissionRate: 0,
+        commissionPerConversion: 0,
+        defaultYearlyFee: ANNUAL_PLAN_PRICE_INR,
+        passcodeHash,
+        isActive: false,
+        createdAtMs: now,
+        updatedAtMs: now,
+      };
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.agents = [newAgent, ...local.agents];
+        saveLocalGrowthState(local);
+        setAgents(local.agents);
+        updateRoleSession({
+          role: 'agent',
+          accountId: newAgent.id,
+          displayName: newAgent.name,
+        });
+        return { ok: true, agent: newAgent };
+      }
+
+      try {
+        await cloudCreateAgent(user, newAgent);
+        updateRoleSession({
+          role: 'agent',
+          accountId: newAgent.id,
+          displayName: newAgent.name,
+        });
+        return { ok: true, agent: newAgent };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [agents, isConfigured, updateRoleSession, user]
+  );
+
+  const updateAgentSelfProfile = useCallback(
+    async (
+      agentId: string,
+      patch: { name: string; phone: string; city: string; upiId: string }
+    ) => {
+      const target = agents.find((a) => a.id === agentId);
+      if (!target) return { ok: false, error: 'Agent profile not found.' };
+      if (!patch.upiId.trim().includes('@')) {
+        return { ok: false, error: 'Enter a valid UPI ID containing "@".' };
+      }
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.agents = local.agents.map((a) =>
+          a.id === agentId
+            ? {
+                ...a,
+                name: patch.name.trim() || a.name,
+                phone: patch.phone.trim() || a.phone,
+                city: patch.city.trim() || a.city,
+                assignedArea: patch.city.trim() || a.assignedArea,
+                upiId: patch.upiId.trim(),
+                updatedAtMs: Date.now(),
+              }
+            : a
+        );
+        saveLocalGrowthState(local);
+        setAgents(local.agents);
+        return { ok: true };
+      }
+
+      try {
+        await cloudUpdateAgentSelfProfile(target, patch);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [agents, isConfigured]
+  );
+
+  const requestAgentPayout = useCallback(
+    async (agentId: string, amount: number, upiId: string) => {
+      const agent = agents.find((a) => a.id === agentId);
+      if (!agent) return { ok: false, error: 'Agent profile not found.' };
+      if (getAgentApprovalStatus(agent) !== 'approved' || !agent.isActive) {
+        return {
+          ok: false,
+          error: 'Your Agent account must be approved by Admin before requesting a payout.',
+        };
+      }
+      const cleanUpi = upiId.trim();
+      if (!cleanUpi.includes('@')) {
+        return { ok: false, error: 'Enter a valid UPI ID before withdrawing.' };
+      }
+      const roundedAmount = Math.round(amount);
+      if (roundedAmount < PAYOUT_MINIMUM_INR) {
+        return {
+          ok: false,
+          error: `Minimum payout threshold is ₹${PAYOUT_MINIMUM_INR}.`,
+        };
+      }
+
+      const ledger = computeAgentCommissionSummary(
+        agent,
+        studentSubscriptions,
+        subscriptions,
+        payoutRequests
+      );
+      if (roundedAmount > ledger.availableBalance) {
+        return {
+          ok: false,
+          error: `Requested ₹${roundedAmount} exceeds available balance (₹${ledger.availableBalance}).`,
+        };
+      }
+
+      const now = Date.now();
+      const reqDoc: PayoutRequest = {
+        id: makeId('pay'),
+        workspaceId: WORKSPACE_ID,
+        ownerUid: user?.uid || agent.ownerUid,
+        agentId: agent.id,
+        agentEmail: agent.email,
+        agentName: agent.name,
+        upiId: cleanUpi,
+        amount: roundedAmount,
+        status: 'pending',
+        utrNumber: '',
+        createdAtMs: now,
+        updatedAtMs: now,
+        paidAt: '',
+      };
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.payoutRequests = [reqDoc, ...local.payoutRequests];
+        saveLocalGrowthState(local);
+        setPayoutRequests(local.payoutRequests);
+        return { ok: true };
+      }
+
+      if (!user) {
+        return { ok: false, error: 'Sign in with Google first.' };
+      }
+      try {
+        await cloudCreatePayoutRequest(user, reqDoc);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [agents, isConfigured, payoutRequests, studentSubscriptions, subscriptions, user]
+  );
 
   const loginAgentPasscode = useCallback(
     async (identifier: string, passcode: string) => {
@@ -571,10 +1564,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             'Agent profile not found in your synced workspace. Sign in with the Google email assigned to your Agent profile.',
         };
       }
-      if (!match.isActive) {
+      if (getAgentApprovalStatus(match) === 'suspended') {
         return {
           ok: false,
-          error: 'This Agent account has been deactivated by Admin.',
+          error: 'This Agent account has been suspended by Admin.',
         };
       }
       const valid = await verifySecret(passcode, match.passcodeHash);
@@ -681,7 +1674,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [signOutUser, updateRoleSession]);
 
   // ---------------------------------------------------------------------------
-  // Admin Operations (Direct Cloud Firestore Writes)
+  // Admin Operations
   // ---------------------------------------------------------------------------
 
   const createAgent = useCallback(
@@ -691,7 +1684,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       phone: string;
       email: string;
       assignedArea: string;
+      city?: string;
+      upiId?: string;
       commissionRate: number;
+      commissionPerConversion?: number;
       defaultYearlyFee: number;
       passcode: string;
     }) => {
@@ -730,6 +1726,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const now = Date.now();
       const passcodeHash = await hashSecret(input.passcode);
+      const areaClean = input.assignedArea.trim() || input.city?.trim() || 'General';
       const newAgent: AgentProfile = {
         id: makeId('ag'),
         workspaceId: WORKSPACE_ID,
@@ -738,10 +1735,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         name: input.name.trim(),
         phone: input.phone.trim(),
         email: emailClean,
-        assignedArea: input.assignedArea.trim() || 'General',
+        assignedArea: areaClean,
+        city: input.city?.trim() || areaClean,
+        upiId: input.upiId?.trim() || '',
+        approvalStatus: 'approved',
         commissionRate: Math.max(
           0,
           Math.min(100, Number(input.commissionRate) || 0)
+        ),
+        commissionPerConversion: Math.max(
+          0,
+          Number(input.commissionPerConversion) || 0
         ),
         defaultYearlyFee: Math.max(0, Number(input.defaultYearlyFee) || 0),
         passcodeHash,
@@ -772,7 +1776,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         phone: string;
         email: string;
         assignedArea: string;
+        city?: string;
+        upiId?: string;
+        approvalStatus?: AgentApprovalStatus;
         commissionRate: number;
+        commissionPerConversion?: number;
         defaultYearlyFee: number;
         newPasscode?: string;
         isActive: boolean;
@@ -796,6 +1804,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         ? await hashSecret(updates.newPasscode)
         : existing.passcodeHash;
 
+      const nextStatus: AgentApprovalStatus =
+        updates.approvalStatus ??
+        (updates.isActive ? 'approved' : 'suspended');
+
       const updated: AgentProfile = {
         ...existing,
         agentCode: updates.agentCode.trim().toUpperCase() || existing.agentCode,
@@ -803,13 +1815,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         phone: updates.phone.trim() || existing.phone,
         email: emailClean,
         assignedArea: updates.assignedArea.trim() || existing.assignedArea,
+        city: updates.city !== undefined ? updates.city.trim() : existing.city,
+        upiId: updates.upiId !== undefined ? updates.upiId.trim() : existing.upiId,
+        approvalStatus: nextStatus,
         commissionRate: Math.max(
           0,
           Math.min(100, Number(updates.commissionRate) || 0)
         ),
+        commissionPerConversion:
+          updates.commissionPerConversion !== undefined
+            ? Math.max(0, Number(updates.commissionPerConversion) || 0)
+            : existing.commissionPerConversion ?? 0,
         defaultYearlyFee: Math.max(0, Number(updates.defaultYearlyFee) || 0),
         passcodeHash,
-        isActive: updates.isActive,
+        isActive: nextStatus === 'approved' && updates.isActive,
         updatedAtMs: Date.now(),
       };
 
@@ -830,15 +1849,48 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     async (agentId: string) => {
       const target = agents.find((a) => a.id === agentId);
       if (!target) return;
+      const nextActive = !target.isActive;
       await updateAgent(agentId, {
         agentCode: target.agentCode,
         name: target.name,
         phone: target.phone,
         email: target.email,
         assignedArea: target.assignedArea,
+        city: target.city,
+        upiId: target.upiId,
+        approvalStatus: nextActive ? 'approved' : 'suspended',
         commissionRate: target.commissionRate,
+        commissionPerConversion: target.commissionPerConversion,
         defaultYearlyFee: target.defaultYearlyFee,
-        isActive: !target.isActive,
+        isActive: nextActive,
+      });
+    },
+    [agents, updateAgent]
+  );
+
+  const setAgentApprovalStatus = useCallback(
+    async (
+      agentId: string,
+      status: AgentApprovalStatus,
+      commissionPerConversion?: number,
+      commissionRate?: number
+    ) => {
+      const target = agents.find((a) => a.id === agentId);
+      if (!target) return { ok: false, error: 'Agent not found.' };
+      return updateAgent(agentId, {
+        agentCode: target.agentCode,
+        name: target.name,
+        phone: target.phone,
+        email: target.email,
+        assignedArea: target.assignedArea,
+        city: target.city,
+        upiId: target.upiId,
+        approvalStatus: status,
+        commissionRate: commissionRate ?? target.commissionRate,
+        commissionPerConversion:
+          commissionPerConversion ?? target.commissionPerConversion,
+        defaultYearlyFee: target.defaultYearlyFee,
+        isActive: status === 'approved',
       });
     },
     [agents, updateAgent]
@@ -905,8 +1957,156 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     [getLatestSubscriptionForParent, isConfigured, user]
   );
 
+  const markPayoutPaid = useCallback(
+    async (payoutId: string, utrNumber: string) => {
+      const cleanUtr = utrNumber.trim();
+      if (!cleanUtr) {
+        return {
+          ok: false,
+          error: 'Enter the bank/UPI UTR Transaction Reference before settling.',
+        };
+      }
+      const paidAt = todayIsoDate();
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.payoutRequests = local.payoutRequests.map((p) =>
+          p.id === payoutId
+            ? { ...p, status: 'paid', utrNumber: cleanUtr, paidAt, updatedAtMs: Date.now() }
+            : p
+        );
+        saveLocalGrowthState(local);
+        setPayoutRequests(local.payoutRequests);
+        return { ok: true };
+      }
+      try {
+        await cloudMarkPayoutPaid(payoutId, cleanUtr, paidAt);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [isConfigured]
+  );
+
+  const generateOfflineVoucher = useCallback(
+    async (agentId?: string) => {
+      const targetAgent = agentId
+        ? agents.find((a) => a.id === agentId)
+        : undefined;
+      const code = makeVoucherCode();
+      const now = Date.now();
+      const voucher: OfflineVoucher = {
+        id: code,
+        code,
+        workspaceId: WORKSPACE_ID,
+        ownerUid: user?.uid || 'admin_local',
+        agentId: targetAgent?.id || '',
+        agentEmail: targetAgent?.email || '',
+        agentName: targetAgent?.name || '',
+        planAmount: ANNUAL_PLAN_PRICE_INR,
+        status: 'unused',
+        redeemedByUid: '',
+        redeemedByEmail: '',
+        createdAtMs: now,
+        redeemedAt: '',
+      };
+
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.vouchers = [voucher, ...local.vouchers];
+        saveLocalGrowthState(local);
+        setVouchers(local.vouchers);
+        return { ok: true, voucher };
+      }
+
+      if (!user) {
+        return { ok: false, error: 'Sign in with Google Admin first.' };
+      }
+      try {
+        await cloudCreateOfflineVoucher(user, voucher);
+        return { ok: true, voucher };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [agents, isConfigured, user]
+  );
+
+  const updateAppConfig = useCallback(
+    async (patch: {
+      dailyChallengeSeed: string;
+      announcementEnabled: boolean;
+      announcementText: string;
+    }) => {
+      const next: AppGlobalConfig = {
+        id: 'global',
+        dailyChallengeSeed:
+          patch.dailyChallengeSeed.trim() || DEFAULT_APP_CONFIG.dailyChallengeSeed,
+        announcementEnabled: patch.announcementEnabled,
+        announcementText: patch.announcementText.trim(),
+        updatedAtMs: Date.now(),
+      };
+      if (!isConfigured) {
+        const local = loadLocalGrowthState();
+        local.appConfig = next;
+        saveLocalGrowthState(local);
+        setAppConfig(next);
+        return { ok: true };
+      }
+      try {
+        await cloudSaveAppConfig(next);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [isConfigured]
+  );
+
+  const moderateLeaderboardEntry = useCallback(
+    async (
+      entryId: string,
+      patch: { isHidden?: boolean; isFlagged?: boolean; flagReason?: string }
+    ) => {
+      try {
+        await cloudUpdateLeaderboardModeration(entryId, patch);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    []
+  );
+
+  const moderateChildChampion = useCallback(
+    async (childId: string, isHidden: boolean) => {
+      try {
+        await cloudUpdateChildLeaderboardVisibility(childId, isHidden);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    []
+  );
+
   // ---------------------------------------------------------------------------
-  // Agent Operations (Direct Cloud Firestore Writes, Credential-Free Children)
+  // Agent Operations (Family Onboarding)
   // ---------------------------------------------------------------------------
 
   const onboardParentAccount = useCallback(
@@ -931,6 +2131,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const agent = agents.find((a) => a.id === input.agentId);
       if (!agent) {
         return { ok: false, error: 'Agent profile could not be verified.' };
+      }
+      if (getAgentApprovalStatus(agent) !== 'approved' || !agent.isActive) {
+        return {
+          ok: false,
+          error: 'Your Agent account is pending Admin approval before onboarding families.',
+        };
       }
 
       const contactClean = input.parentContact.trim();
@@ -1033,7 +2239,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       };
 
       try {
-        // Sequential Parent create first so Firestore exists(/parents/{parentId}) rules pass
         await cloudCreateParent(user, newParent);
         await Promise.all([
           ...newChildren.map((ch) => cloudCreateChild(user, ch)),
@@ -1154,7 +2359,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   // ---------------------------------------------------------------------------
-  // Child Practice Session Recording & Live Top 3 Champions Sync
+  // Child Practice Session Recording & Live Champions Sync
   // ---------------------------------------------------------------------------
 
   const recordChildPractice = useCallback(
@@ -1258,6 +2463,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       children,
       subscriptions,
       practiceSessions,
+      leads,
+      studentSubscriptions,
+      payoutRequests,
+      vouchers,
+      appConfig,
       topChampions,
       topChampionsLoading,
       topChampionsError,
@@ -1270,17 +2480,42 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       isGoogleAdmin,
       dismissPlatformError,
       dismissRoleResolveNotice,
+      capturedReferralCode,
+      isProSubscriber,
+      myStudentSubscription,
+      freeAdaptiveUsedCount,
+      markFreeAdaptiveUsed,
+      customPresets,
+      saveCustomPreset,
+      deleteCustomPreset,
+      isCheckoutOpen,
+      checkoutInitialTab,
+      openCheckoutModal,
+      closeCheckoutModal,
+      validatePromoCode,
+      completeAnnualCheckout,
+      redeemOfflineVoucher,
+      recordTrialLeadIfReferred,
       signInAndRouteWithGoogle,
       signInWithGoogleRedirectFlow,
       loginAgentPasscode,
       loginParentPasscode,
+      registerSalesAgent,
+      updateAgentSelfProfile,
+      requestAgentPayout,
       switchToChildMode,
       exitChildModeToParent,
       logoutRole,
       createAgent,
       updateAgent,
       toggleAgentActive,
+      setAgentApprovalStatus,
       adminOverrideSubscription,
+      markPayoutPaid,
+      generateOfflineVoucher,
+      updateAppConfig,
+      moderateLeaderboardEntry,
+      moderateChildChampion,
       onboardParentAccount,
       addChildToParent,
       renewParentSubscription,
@@ -1299,6 +2534,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       children,
       subscriptions,
       practiceSessions,
+      leads,
+      studentSubscriptions,
+      payoutRequests,
+      vouchers,
+      appConfig,
       topChampions,
       topChampionsLoading,
       topChampionsError,
@@ -1311,17 +2551,42 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       isGoogleAdmin,
       dismissPlatformError,
       dismissRoleResolveNotice,
+      capturedReferralCode,
+      isProSubscriber,
+      myStudentSubscription,
+      freeAdaptiveUsedCount,
+      markFreeAdaptiveUsed,
+      customPresets,
+      saveCustomPreset,
+      deleteCustomPreset,
+      isCheckoutOpen,
+      checkoutInitialTab,
+      openCheckoutModal,
+      closeCheckoutModal,
+      validatePromoCode,
+      completeAnnualCheckout,
+      redeemOfflineVoucher,
+      recordTrialLeadIfReferred,
       signInAndRouteWithGoogle,
       signInWithGoogleRedirectFlow,
       loginAgentPasscode,
       loginParentPasscode,
+      registerSalesAgent,
+      updateAgentSelfProfile,
+      requestAgentPayout,
       switchToChildMode,
       exitChildModeToParent,
       logoutRole,
       createAgent,
       updateAgent,
       toggleAgentActive,
+      setAgentApprovalStatus,
       adminOverrideSubscription,
+      markPayoutPaid,
+      generateOfflineVoucher,
+      updateAppConfig,
+      moderateLeaderboardEntry,
+      moderateChildChampion,
       onboardParentAccount,
       addChildToParent,
       renewParentSubscription,

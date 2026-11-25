@@ -7,8 +7,8 @@ import {
   MathProblem,
 } from '../types/math';
 
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+function randInt(min: number, max: number, rng: () => number = Math.random): number {
+  return Math.floor(rng() * (max - min + 1)) + min;
 }
 
 interface ClassNumberRanges {
@@ -145,7 +145,8 @@ const CLASS_RANGES: Record<IndianClass, ClassNumberRanges> = {
 
 function pickOperation(
   mode: ArithmeticMode,
-  indianClass?: IndianClass
+  indianClass?: IndianClass,
+  rng: () => number = Math.random
 ): ConcreteOperation {
   const allowedOps: ConcreteOperation[] = indianClass
     ? INDIAN_CLASS_META[indianClass].allowedOperations
@@ -154,7 +155,7 @@ function pickOperation(
   if (mode !== 'mixed' && allowedOps.includes(mode)) {
     return mode;
   }
-  return allowedOps[Math.floor(Math.random() * allowedOps.length)];
+  return allowedOps[Math.floor(rng() * allowedOps.length)];
 }
 
 function resolveRanges(
@@ -173,7 +174,8 @@ function buildSingleProblem(
   operation: ConcreteOperation,
   difficulty: Difficulty,
   allowNegatives: boolean,
-  indianClass?: IndianClass
+  indianClass?: IndianClass,
+  rng: () => number = Math.random
 ): Omit<MathProblem, 'id' | 'presentedAt'> {
   const ranges = resolveRanges(difficulty, indianClass);
   const negativesEnabled =
@@ -182,8 +184,8 @@ function buildSingleProblem(
 
   if (operation === 'addition') {
     const [min, max] = ranges.add;
-    const operandA = randInt(min, max);
-    const operandB = randInt(min, max);
+    const operandA = randInt(min, max, rng);
+    const operandB = randInt(min, max, rng);
     return {
       operandA,
       operandB,
@@ -196,8 +198,8 @@ function buildSingleProblem(
 
   if (operation === 'subtraction') {
     const [min, max] = ranges.sub;
-    let operandA = randInt(min, max);
-    let operandB = randInt(min, max);
+    let operandA = randInt(min, max, rng);
+    let operandB = randInt(min, max, rng);
 
     if (!negativesEnabled && operandA < operandB) {
       [operandA, operandB] = [operandB, operandA];
@@ -211,7 +213,7 @@ function buildSingleProblem(
       indianClass !== 'UKG' &&
       difficulty !== 'easy'
     ) {
-      operandA += randInt(1, 9);
+      operandA += randInt(1, 9, rng);
     }
 
     return {
@@ -225,10 +227,10 @@ function buildSingleProblem(
   }
 
   if (operation === 'multiplication') {
-    let operandA = randInt(ranges.mulA[0], ranges.mulA[1]);
-    let operandB = randInt(ranges.mulB[0], ranges.mulB[1]);
+    let operandA = randInt(ranges.mulA[0], ranges.mulA[1], rng);
+    let operandB = randInt(ranges.mulB[0], ranges.mulB[1], rng);
 
-    if (Math.random() < 0.5) {
+    if (rng() < 0.5) {
       [operandA, operandB] = [operandB, operandA];
     }
 
@@ -243,8 +245,8 @@ function buildSingleProblem(
   }
 
   // Division: exact integer factors only (quotient * divisor) ÷ divisor = quotient
-  const divisor = randInt(ranges.divDivisor[0], ranges.divDivisor[1]);
-  const quotient = randInt(ranges.divQuotient[0], ranges.divQuotient[1]);
+  const divisor = randInt(ranges.divDivisor[0], ranges.divDivisor[1], rng);
+  const quotient = randInt(ranges.divQuotient[0], ranges.divQuotient[1], rng);
   const dividend = divisor * quotient;
 
   return {
@@ -268,13 +270,15 @@ export function generateProblem(
   difficulty: Difficulty,
   allowNegatives: boolean,
   previousSignature?: string,
-  indianClass?: IndianClass
+  indianClass?: IndianClass,
+  rng: () => number = Math.random
 ): MathProblem {
   let candidate = buildSingleProblem(
-    pickOperation(mode, indianClass),
+    pickOperation(mode, indianClass, rng),
     difficulty,
     allowNegatives,
-    indianClass
+    indianClass,
+    rng
   );
 
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -282,10 +286,11 @@ export function generateProblem(
       break;
     }
     candidate = buildSingleProblem(
-      pickOperation(mode, indianClass),
+      pickOperation(mode, indianClass, rng),
       difficulty,
       allowNegatives,
-      indianClass
+      indianClass,
+      rng
     );
   }
 

@@ -1,34 +1,48 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   Ban,
   CalendarPlus,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   Edit3,
+  Eye,
+  EyeOff,
   LogOut,
   MapPin,
+  Megaphone,
   Phone,
   Plus,
   Search,
   ShieldCheck,
+  Sparkles,
+  Ticket,
   Trophy,
   UserCheck,
   UserX,
+  Wallet,
   X,
 } from 'lucide-react';
+import { useFirebase } from '../../context/FirebaseContext';
 import { usePlatform } from '../../context/PlatformContext';
 import { formatIndianClassLabel } from '../../types/math';
 import {
+  AgentApprovalStatus,
   AgentProfile,
   ComputedSubscriptionState,
   PAYMENT_METHOD_LABELS,
+  computeAgentCommissionSummary,
   evaluateSubscriptionState,
   formatCurrency,
   formatIsoDate,
+  getAgentApprovalStatus,
+  isSuspiciousSpeedRun,
 } from '../../types/platform';
 
-type AdminTab = 'agents' | 'subscriptions' | 'leaderboard';
+type AdminTab = 'agents' | 'subscriptions' | 'payouts' | 'leaderboard';
 type SubFilter = 'all' | ComputedSubscriptionState;
 
 interface AgentFormState {
@@ -37,7 +51,11 @@ interface AgentFormState {
   phone: string;
   email: string;
   assignedArea: string;
+  city: string;
+  upiId: string;
+  approvalStatus: AgentApprovalStatus;
   commissionRate: string;
+  commissionPerConversion: string;
   defaultYearlyFee: string;
   passcode: string;
 }
@@ -48,23 +66,38 @@ const EMPTY_AGENT_FORM: AgentFormState = {
   phone: '',
   email: '',
   assignedArea: '',
+  city: '',
+  upiId: '',
+  approvalStatus: 'approved',
   commissionRate: '15',
+  commissionPerConversion: '',
   defaultYearlyFee: '1200',
   passcode: '',
 };
 
 export const AdminDashboard: React.FC = () => {
+  const { leaderboard } = useFirebase();
   const {
     agents,
     parents,
     children,
     subscriptions,
+    studentSubscriptions,
+    payoutRequests,
+    vouchers,
+    appConfig,
+    childLeaderboard,
     roleSession,
     logoutRole,
     createAgent,
     updateAgent,
-    toggleAgentActive,
+    setAgentApprovalStatus,
     adminOverrideSubscription,
+    markPayoutPaid,
+    generateOfflineVoucher,
+    updateAppConfig,
+    moderateLeaderboardEntry,
+    moderateChildChampion,
     getAgentById,
     getChildrenForParent,
     getLatestSubscriptionForParent,
@@ -80,10 +113,45 @@ export const AdminDashboard: React.FC = () => {
   const [savingAgent, setSavingAgent] = useState(false);
 
   const [agentQuery, setAgentQuery] = useState('');
+  const [agentStatusFilter, setAgentStatusFilter] = useState<
+    'all' | AgentApprovalStatus
+  >('all');
   const [subFilter, setSubFilter] = useState<SubFilter>('all');
   const [subQuery, setSubQuery] = useState('');
   const [overrideNotice, setOverrideNotice] = useState<string | null>(null);
   const [busyParentId, setBusyParentId] = useState<string | null>(null);
+
+  // Payouts & Vouchers State
+  const [utrByPayoutId, setUtrByPayoutId] = useState<Record<string, string>>({});
+  const [busyPayoutId, setBusyPayoutId] = useState<string | null>(null);
+  const [voucherAgentId, setVoucherAgentId] = useState<string>('');
+  const [voucherFilter, setVoucherFilter] = useState<'all' | 'unused' | 'redeemed'>(
+    'all'
+  );
+  const [generatingVoucher, setGeneratingVoucher] = useState(false);
+  const [copiedVoucherCode, setCopiedVoucherCode] = useState<string | null>(null);
+
+  // Global Content & Seed Controls State
+  const [dailySeedInput, setDailySeedInput] = useState(
+    appConfig.dailyChallengeSeed
+  );
+  const [announcementEnabledInput, setAnnouncementEnabledInput] = useState(
+    appConfig.announcementEnabled
+  );
+  const [announcementTextInput, setAnnouncementTextInput] = useState(
+    appConfig.announcementText
+  );
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  useEffect(() => {
+    setDailySeedInput(appConfig.dailyChallengeSeed);
+    setAnnouncementEnabledInput(appConfig.announcementEnabled);
+    setAnnouncementTextInput(appConfig.announcementText);
+  }, [
+    appConfig.announcementEnabled,
+    appConfig.announcementText,
+    appConfig.dailyChallengeSeed,
+  ]);
 
   // Platform Analytics
   const analytics = useMemo(() => {
@@ -103,19 +171,30 @@ export const AdminDashboard: React.FC = () => {
       }
     }
 
-    const totalRevenue = subscriptions.reduce((sum, s) => sum + s.feeAmount, 0);
-    const activeAgentsCount = agents.filter((a) => a.isActive).length;
+    const totalRevenue =
+      subscriptions.reduce((sum, s) => sum + s.feeAmount, 0) +
+      studentSubscriptions.reduce((sum, s) => sum + s.amountPaid, 0);
+    const activeAgentsCount = agents.filter(
+      (a) => getAgentApprovalStatus(a) === 'approved'
+    ).length;
 
     return {
       totalParents: parents.length,
       totalChildren: children.length,
-      activeYearlyPlans,
+      activeYearlyPlans: activeYearlyPlans + studentSubscriptions.length,
       expiringSoonPlans,
       expiredOrSuspendedPlans,
       totalRevenue,
       activeAgentsCount,
     };
-  }, [agents, children.length, getLatestSubscriptionForParent, parents, subscriptions]);
+  }, [
+    agents,
+    children.length,
+    getLatestSubscriptionForParent,
+    parents,
+    studentSubscriptions,
+    subscriptions,
+  ]);
 
   // Agent Performance Metrics (used in both Agent cards and Leaderboard)
   const agentStatsMap = useMemo(() => {
@@ -134,14 +213,22 @@ export const AdminDashboard: React.FC = () => {
       const agParents = parents.filter((p) => p.createdByAgentId === ag.id);
       const agChildren = children.filter((c) => c.createdByAgentId === ag.id);
       const agSubs = subscriptions.filter((s) => s.collectedByAgentId === ag.id);
-      const feesCollected = agSubs.reduce((sum, s) => sum + s.feeAmount, 0);
-      const activePlans = agParents.filter((p) => {
-        const st = evaluateSubscriptionState(getLatestSubscriptionForParent(p.id));
-        return st.canPractice;
-      }).length;
-      const estimatedCommission = Math.round(
-        (feesCollected * ag.commissionRate) / 100
+      const agStudentSubs = studentSubscriptions.filter(
+        (s) => s.attributedAgentId === ag.id
       );
+      const feesCollected =
+        agSubs.reduce((sum, s) => sum + s.feeAmount, 0) +
+        agStudentSubs.reduce((sum, s) => sum + s.amountPaid, 0);
+      const activePlans =
+        agParents.filter((p) => {
+          const st = evaluateSubscriptionState(getLatestSubscriptionForParent(p.id));
+          return st.canPractice;
+        }).length + agStudentSubs.length;
+      const estimatedCommission =
+        Math.round(
+          (agSubs.reduce((sum, s) => sum + s.feeAmount, 0) * ag.commissionRate) /
+            100
+        ) + agStudentSubs.reduce((sum, s) => sum + s.commissionAmount, 0);
 
       map.set(ag.id, {
         parentsCount: agParents.length,
@@ -152,19 +239,32 @@ export const AdminDashboard: React.FC = () => {
       });
     }
     return map;
-  }, [agents, children, getLatestSubscriptionForParent, parents, subscriptions]);
+  }, [
+    agents,
+    children,
+    getLatestSubscriptionForParent,
+    parents,
+    studentSubscriptions,
+    subscriptions,
+  ]);
 
   const filteredAgents = useMemo(() => {
     const q = agentQuery.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter(
-      (a) =>
+    return agents.filter((a) => {
+      const status = getAgentApprovalStatus(a);
+      if (agentStatusFilter !== 'all' && status !== agentStatusFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
         a.name.toLowerCase().includes(q) ||
         a.agentCode.toLowerCase().includes(q) ||
         a.phone.toLowerCase().includes(q) ||
-        a.assignedArea.toLowerCase().includes(q)
-    );
-  }, [agentQuery, agents]);
+        (a.city || a.assignedArea).toLowerCase().includes(q) ||
+        (a.upiId || '').toLowerCase().includes(q)
+      );
+    });
+  }, [agentQuery, agentStatusFilter, agents]);
 
   const parentSubscriptionRows = useMemo(() => {
     const q = subQuery.trim().toLowerCase();
@@ -230,6 +330,28 @@ export const AdminDashboard: React.FC = () => {
       });
   }, [agentStatsMap, agents]);
 
+  const sortedPayouts = useMemo(() => {
+    return [...payoutRequests].sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
+      return b.createdAtMs - a.createdAtMs;
+    });
+  }, [payoutRequests]);
+
+  const filteredVouchers = useMemo(() => {
+    return vouchers.filter((v) =>
+      voucherFilter === 'all' ? true : v.status === voucherFilter
+    );
+  }, [voucherFilter, vouchers]);
+
+  const sortedSprintLeaderboard = useMemo(() => {
+    return [...leaderboard].sort((a, b) => {
+      const aFlag = a.isFlagged || isSuspiciousSpeedRun(a.avgResponseMs, a.score) ? 1 : 0;
+      const bFlag = b.isFlagged || isSuspiciousSpeedRun(b.avgResponseMs, b.score) ? 1 : 0;
+      if (aFlag !== bFlag) return bFlag - aFlag;
+      return b.score - a.score;
+    });
+  }, [leaderboard]);
+
   const openCreateForm = () => {
     setEditingAgentId(null);
     setAgentForm({
@@ -248,7 +370,13 @@ export const AdminDashboard: React.FC = () => {
       phone: agent.phone,
       email: agent.email,
       assignedArea: agent.assignedArea,
+      city: agent.city ?? '',
+      upiId: agent.upiId ?? '',
+      approvalStatus: getAgentApprovalStatus(agent),
       commissionRate: String(agent.commissionRate),
+      commissionPerConversion: agent.commissionPerConversion
+        ? String(agent.commissionPerConversion)
+        : '',
       defaultYearlyFee: String(agent.defaultYearlyFee),
       passcode: '',
     });
@@ -261,18 +389,23 @@ export const AdminDashboard: React.FC = () => {
     setFormError(null);
     setSavingAgent(true);
 
+    const flatComm = Number(agentForm.commissionPerConversion) || 0;
+
     if (editingAgentId) {
-      const existing = getAgentById(editingAgentId);
       const res = await updateAgent(editingAgentId, {
         agentCode: agentForm.agentCode,
         name: agentForm.name,
         phone: agentForm.phone,
         email: agentForm.email,
-        assignedArea: agentForm.assignedArea,
+        assignedArea: agentForm.assignedArea || agentForm.city,
+        city: agentForm.city,
+        upiId: agentForm.upiId,
+        approvalStatus: agentForm.approvalStatus,
         commissionRate: Number(agentForm.commissionRate) || 0,
+        commissionPerConversion: flatComm,
         defaultYearlyFee: Number(agentForm.defaultYearlyFee) || 0,
         newPasscode: agentForm.passcode || undefined,
-        isActive: existing ? existing.isActive : true,
+        isActive: agentForm.approvalStatus === 'approved',
       });
       setSavingAgent(false);
       if (!res.ok) {
@@ -286,8 +419,11 @@ export const AdminDashboard: React.FC = () => {
         name: agentForm.name,
         phone: agentForm.phone,
         email: agentForm.email,
-        assignedArea: agentForm.assignedArea,
+        assignedArea: agentForm.assignedArea || agentForm.city,
+        city: agentForm.city,
+        upiId: agentForm.upiId,
         commissionRate: Number(agentForm.commissionRate) || 0,
+        commissionPerConversion: flatComm,
         defaultYearlyFee: Number(agentForm.defaultYearlyFee) || 0,
         passcode: agentForm.passcode,
       });
@@ -324,6 +460,62 @@ export const AdminDashboard: React.FC = () => {
           : 'Suspended';
       setOverrideNotice(`${verb}: ${parentName}'s yearly subscription.`);
       setTimeout(() => setOverrideNotice(null), 4000);
+    } else if (res.error) {
+      setOverrideNotice(res.error);
+    }
+  };
+
+  const handleMarkPayoutPaid = async (payoutId: string) => {
+    const utr = (utrByPayoutId[payoutId] || '').trim();
+    if (utr.length < 4) {
+      setOverrideNotice('Enter a valid UTR / Transaction Reference before marking Paid.');
+      return;
+    }
+    setBusyPayoutId(payoutId);
+    const res = await markPayoutPaid(payoutId, utr);
+    setBusyPayoutId(null);
+    if (res.ok) {
+      setOverrideNotice(`Payout settled with UTR ${utr}.`);
+      setTimeout(() => setOverrideNotice(null), 4000);
+    } else if (res.error) {
+      setOverrideNotice(res.error);
+    }
+  };
+
+  const handleGenerateVoucher = async () => {
+    setGeneratingVoucher(true);
+    const res = await generateOfflineVoucher(voucherAgentId || undefined);
+    setGeneratingVoucher(false);
+    if (res.ok && res.voucher) {
+      setFormSuccess(`Generated 1-Year Cash Voucher: ${res.voucher.code}`);
+      setTimeout(() => setFormSuccess(null), 5000);
+    } else if (res.error) {
+      setOverrideNotice(res.error);
+    }
+  };
+
+  const handleCopyVoucher = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedVoucherCode(code);
+      window.setTimeout(() => setCopiedVoucherCode(null), 2000);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleSaveGlobalConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingConfig(true);
+    const res = await updateAppConfig({
+      dailyChallengeSeed: dailySeedInput,
+      announcementEnabled: announcementEnabledInput,
+      announcementText: announcementTextInput,
+    });
+    setSavingConfig(false);
+    if (res.ok) {
+      setFormSuccess('Saved Daily Challenge Seed & site-wide announcement settings.');
+      setTimeout(() => setFormSuccess(null), 4000);
     } else if (res.error) {
       setOverrideNotice(res.error);
     }
@@ -427,13 +619,19 @@ export const AdminDashboard: React.FC = () => {
       <div
         role="tablist"
         aria-label="Admin sections"
-        className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800"
       >
         {(
           [
             { id: 'agents', label: `Agents (${agents.length})` },
-            { id: 'subscriptions', label: `Subscriptions (${parents.length})` },
-            { id: 'leaderboard', label: 'Agent Board' },
+            { id: 'subscriptions', label: `Plans (${parents.length})` },
+            {
+              id: 'payouts',
+              label: `Payouts (${
+                payoutRequests.filter((p) => p.status === 'pending').length
+              })`,
+            },
+            { id: 'leaderboard', label: 'Boards & Config' },
           ] as const
         ).map((tab) => (
           <button
@@ -442,7 +640,7 @@ export const AdminDashboard: React.FC = () => {
             role="tab"
             aria-selected={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`min-h-[44px] px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap truncate ${
+            className={`min-h-[44px] px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap truncate ${
               activeTab === tab.id
                 ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -593,6 +791,36 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    City
+                  </label>
+                  <input
+                    type="text"
+                    value={agentForm.city}
+                    onChange={(e) =>
+                      setAgentForm((f) => ({ ...f, city: e.target.value }))
+                    }
+                    placeholder="e.g. Pune"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    UPI ID (for Payouts)
+                  </label>
+                  <input
+                    type="text"
+                    value={agentForm.upiId}
+                    onChange={(e) =>
+                      setAgentForm((f) => ({ ...f, upiId: e.target.value }))
+                    }
+                    placeholder="e.g. rajesh@okicici"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Assigned Area / Zone
                   </label>
                   <input
@@ -611,7 +839,27 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Commission Rate (%)
+                    Flat Comm / Sale (INR, 0 = Auto Tier)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={25}
+                    value={agentForm.commissionPerConversion}
+                    onChange={(e) =>
+                      setAgentForm((f) => ({
+                        ...f,
+                        commissionPerConversion: e.target.value,
+                      }))
+                    }
+                    placeholder="Auto (₹300 → ₹350)"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Family Renewal Comm (%)
                   </label>
                   <input
                     type="number"
@@ -647,6 +895,28 @@ export const AdminDashboard: React.FC = () => {
                     className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
+
+                {editingAgentId && (
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Approval Status
+                    </label>
+                    <select
+                      value={agentForm.approvalStatus}
+                      onChange={(e) =>
+                        setAgentForm((f) => ({
+                          ...f,
+                          approvalStatus: e.target.value as AgentApprovalStatus,
+                        }))
+                      }
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                    >
+                      <option value="approved">Approved</option>
+                      <option value="pending">Pending</option>
+                      <option value="suspended">Suspended</option>
+                    </select>
+                  </div>
+                )}
 
                 <div className="space-y-1 sm:col-span-2 lg:col-span-2">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -697,16 +967,42 @@ export const AdminDashboard: React.FC = () => {
             </form>
           )}
 
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="search"
-              value={agentQuery}
-              onChange={(e) => setAgentQuery(e.target.value)}
-              placeholder="Search agents by name, Agent ID, phone, or assigned area…"
-              className="w-full min-h-[44px] pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-            />
+          {/* Search Bar & Approval Status Filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="search"
+                value={agentQuery}
+                onChange={(e) => setAgentQuery(e.target.value)}
+                placeholder="Search agents by name, code, phone, city, or UPI…"
+                className="w-full min-h-[44px] pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div className="grid grid-cols-4 sm:flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800">
+              {(
+                [
+                  { id: 'all', label: 'All' },
+                  { id: 'pending', label: 'Pending' },
+                  { id: 'approved', label: 'Approved' },
+                  { id: 'suspended', label: 'Suspended' },
+                ] as const
+              ).map((st) => (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => setAgentStatusFilter(st.id)}
+                  className={`min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                    agentStatusFilter === st.id
+                      ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Agent Cards */}
@@ -743,6 +1039,13 @@ export const AdminDashboard: React.FC = () => {
                   feesCollected: 0,
                   estimatedCommission: 0,
                 };
+                const approvalStatus = getAgentApprovalStatus(agent);
+                const ledger = computeAgentCommissionSummary(
+                  agent,
+                  studentSubscriptions,
+                  subscriptions,
+                  payoutRequests
+                );
                 return (
                   <article
                     key={agent.id}
@@ -765,32 +1068,40 @@ export const AdminDashboard: React.FC = () => {
                           </span>
                           <span className="inline-flex items-center gap-1">
                             <MapPin className="w-3.5 h-3.5 shrink-0" />
-                            {agent.assignedArea}
+                            {agent.city || agent.assignedArea || 'No city'}
                           </span>
                         </p>
-                        {agent.email && (
+                        {(agent.email || agent.upiId) && (
                           <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                             {agent.email}
+                            {agent.upiId ? ` · UPI: ${agent.upiId}` : ''}
                           </p>
                         )}
                       </div>
 
                       <span
                         className={`inline-flex items-center gap-1 text-xs font-semibold shrink-0 ${
-                          agent.isActive
+                          approvalStatus === 'approved'
                             ? 'text-emerald-700 dark:text-emerald-400'
+                            : approvalStatus === 'pending'
+                            ? 'text-amber-600 dark:text-amber-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}
                       >
-                        {agent.isActive ? (
+                        {approvalStatus === 'approved' ? (
                           <>
                             <CheckCircle2 className="w-4 h-4 shrink-0" />
-                            Active
+                            Approved
+                          </>
+                        ) : approvalStatus === 'pending' ? (
+                          <>
+                            <Clock className="w-4 h-4 shrink-0" />
+                            Pending
                           </>
                         ) : (
                           <>
                             <Ban className="w-4 h-4 shrink-0" />
-                            Inactive
+                            Suspended
                           </>
                         )}
                       </span>
@@ -799,26 +1110,28 @@ export const AdminDashboard: React.FC = () => {
                     <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 font-mono tabular-nums">
                       <div>
                         <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
-                          Families
+                          Conversions
                         </span>
                         <span className="text-base font-bold text-slate-950 dark:text-white">
-                          {stats.parentsCount}
+                          {ledger.totalConversions}
                         </span>
                       </div>
                       <div>
                         <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
-                          Fees Collected
+                          Earned / Avail
                         </span>
-                        <span className="text-base font-bold text-slate-950 dark:text-white">
-                          {formatCurrency(stats.feesCollected)}
+                        <span className="text-sm font-bold text-slate-950 dark:text-white">
+                          {formatCurrency(ledger.totalEarned)} / {formatCurrency(ledger.availableBalance)}
                         </span>
                       </div>
                       <div>
                         <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
-                          Rate · Fee
+                          Comm Tier
                         </span>
                         <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                          {agent.commissionRate}% · {formatCurrency(agent.defaultYearlyFee)}
+                          {agent.commissionPerConversion && agent.commissionPerConversion > 0
+                            ? `${formatCurrency(agent.commissionPerConversion)}/sale`
+                            : `${formatCurrency(ledger.currentRatePerConversion)} (Auto)`}
                         </span>
                       </div>
                     </div>
@@ -827,32 +1140,37 @@ export const AdminDashboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => openEditForm(agent)}
-                        className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200"
+                        className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200"
                       >
                         <Edit3 className="w-4 h-4 shrink-0" />
                         Edit
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void toggleAgentActive(agent.id)}
-                        className={`flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition-colors ${
-                          agent.isActive
-                            ? 'border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40'
-                            : 'border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-                        }`}
-                      >
-                        {agent.isActive ? (
-                          <>
-                            <UserX className="w-4 h-4 shrink-0" />
-                            Deactivate
-                          </>
-                        ) : (
-                          <>
-                            <UserCheck className="w-4 h-4 shrink-0" />
-                            Activate
-                          </>
-                        )}
-                      </button>
+
+                      {approvalStatus !== 'approved' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void setAgentApprovalStatus(agent.id, 'approved')
+                          }
+                          className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold transition-colors"
+                        >
+                          <UserCheck className="w-4 h-4 shrink-0" />
+                          Approve
+                        </button>
+                      )}
+
+                      {approvalStatus !== 'suspended' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void setAgentApprovalStatus(agent.id, 'suspended')
+                          }
+                          className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 text-xs sm:text-sm font-semibold transition-colors"
+                        >
+                          <UserX className="w-4 h-4 shrink-0" />
+                          Suspend
+                        </button>
+                      )}
                     </div>
                   </article>
                 );
@@ -1064,11 +1382,422 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 3: AGENT ONBOARDING LEADERBOARD                                   */}
+      {/* TAB 3: PAYOUT SETTLEMENT QUEUE & OFFLINE CASH VOUCHER GENERATOR       */}
+      {/* ===================================================================== */}
+      {activeTab === 'payouts' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Payout Settlement Queue */}
+          <section className="lg:col-span-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                  Payout Settlement Queue
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Transfer requested commissions to Agent UPI IDs and record the UTR reference.
+                </p>
+              </div>
+              <Wallet className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+            </div>
+
+            {sortedPayouts.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400 py-4">
+                No agent withdrawal requests submitted yet.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {sortedPayouts.map((req) => (
+                  <article
+                    key={req.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-display text-sm font-bold text-slate-950 dark:text-white truncate">
+                          {req.agentName}
+                        </p>
+                        <p className="font-mono text-xs text-slate-600 dark:text-slate-400 truncate">
+                          UPI: {req.upiId}
+                        </p>
+                      </div>
+                      <div className="text-right font-mono tabular-nums shrink-0">
+                        <span className="block text-base font-bold text-slate-950 dark:text-white">
+                          {formatCurrency(req.amount)}
+                        </span>
+                        <span
+                          className={`text-[11px] font-sans font-bold ${
+                            req.status === 'paid'
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {req.status === 'paid' ? 'Settled' : 'Pending'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {req.status === 'pending' ? (
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={utrByPayoutId[req.id] ?? ''}
+                          onChange={(e) =>
+                            setUtrByPayoutId((prev) => ({
+                              ...prev,
+                              [req.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="Enter UTR / Bank Ref #"
+                          className="flex-1 min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono text-slate-900 dark:text-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={busyPayoutId === req.id}
+                          onClick={() => void handleMarkPayoutPaid(req.id)}
+                          className="min-h-[44px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap"
+                        >
+                          {busyPayoutId === req.id ? 'Saving…' : 'Mark as Paid'}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-xs font-mono text-emerald-700 dark:text-emerald-400">
+                        UTR: {req.utrNumber} · Paid {formatIsoDate(req.paidAt)}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Offline Cash Voucher Generator */}
+          <section className="lg:col-span-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                  Offline Cash Voucher Generator
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Issue single-use 1-year activation codes for cash-paying students.
+                </p>
+              </div>
+              <Ticket className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select
+                value={voucherAgentId}
+                onChange={(e) => setVoucherAgentId(e.target.value)}
+                aria-label="Attribute voucher to agent"
+                className="flex-1 min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs sm:text-sm text-slate-900 dark:text-white"
+              >
+                <option value="">Direct Admin (No Agent Attribution)</option>
+                {agents.map((ag) => (
+                  <option key={ag.id} value={ag.id}>
+                    {ag.name} ({ag.agentCode})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={generatingVoucher}
+                onClick={() => void handleGenerateVoucher()}
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold whitespace-nowrap"
+              >
+                {generatingVoucher ? 'Generating…' : 'Generate 1-Yr Voucher'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800">
+              {(
+                [
+                  { id: 'all', label: `All (${vouchers.length})` },
+                  {
+                    id: 'unused',
+                    label: `Unused (${
+                      vouchers.filter((v) => v.status === 'unused').length
+                    })`,
+                  },
+                  {
+                    id: 'redeemed',
+                    label: `Redeemed (${
+                      vouchers.filter((v) => v.status === 'redeemed').length
+                    })`,
+                  },
+                ] as const
+              ).map((vf) => (
+                <button
+                  key={vf.id}
+                  type="button"
+                  onClick={() => setVoucherFilter(vf.id)}
+                  className={`min-h-[40px] px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    voucherFilter === vf.id
+                      ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  {vf.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredVouchers.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400 py-3">
+                No vouchers in this filter yet.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
+                {filteredVouchers.map((v) => (
+                  <div
+                    key={v.id}
+                    className="py-3 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="font-mono text-sm font-bold text-slate-950 dark:text-white">
+                        {v.code}
+                      </p>
+                      <p className="text-slate-500 dark:text-slate-400 truncate">
+                        {v.agentName ? `Partner: ${v.agentName}` : 'Direct Admin'}
+                        {v.status === 'redeemed' && v.redeemedByEmail
+                          ? ` · Used by ${v.redeemedByEmail}`
+                          : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span
+                        className={`font-bold ${
+                          v.status === 'unused'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        {v.status === 'unused' ? 'Unused' : 'Redeemed'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyVoucher(v.code)}
+                        aria-label={`Copy voucher ${v.code}`}
+                        className="min-h-[36px] min-w-[36px] rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        {copiedVoucherCode === v.code ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 4: BOARDS, ANTI-CHEAT MODERATION & GLOBAL CONFIG                  */}
       {/* ===================================================================== */}
       {activeTab === 'leaderboard' && (
-        <div className="space-y-4">
-          {agentLeaderboard.length === 0 ? (
+        <div className="space-y-6">
+          {/* Platform Content Controls: Daily Seed & Announcement Banner */}
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                  Daily Challenge Seed &amp; Site Announcement
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Control today&apos;s deterministic Daily Challenge seed and broadcast a site-wide banner.
+                </p>
+              </div>
+              <Megaphone className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+            </div>
+
+            <form onSubmit={handleSaveGlobalConfig} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                <div className="md:col-span-4 space-y-1">
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    Daily Challenge Seed
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={dailySeedInput}
+                    onChange={(e) => setDailySeedInput(e.target.value)}
+                    placeholder="DAILY-2026"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-mono text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="md:col-span-6 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Site-Wide Announcement Text
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={announcementEnabledInput}
+                        onChange={(e) =>
+                          setAnnouncementEnabledInput(e.target.checked)
+                        }
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                      />
+                      Banner Active
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    value={announcementTextInput}
+                    onChange={(e) => setAnnouncementTextInput(e.target.value)}
+                    placeholder="e.g. Sunday Speedster Challenge starts at 5 PM IST!"
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={savingConfig}
+                    className="w-full min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold whitespace-nowrap"
+                  >
+                    {savingConfig ? 'Saving…' : 'Save Settings'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </section>
+
+          {/* Anti-Cheat Sprint Leaderboard Moderation */}
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                  Anti-Cheat Sprint Moderation ({sortedSprintLeaderboard.length})
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Runs faster than 150ms/question are auto-flagged. Hide suspicious runs or restore valid scores.
+                </p>
+              </div>
+            </div>
+
+            {sortedSprintLeaderboard.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                No speed sprint records found yet.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
+                {sortedSprintLeaderboard.slice(0, 30).map((entry) => {
+                  const flagged =
+                    entry.isFlagged ||
+                    isSuspiciousSpeedRun(entry.avgResponseMs, entry.score);
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                        flagged ? 'bg-red-50/50 dark:bg-red-950/20 -mx-2 px-2 rounded-xl' : ''
+                      }`}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-slate-950 dark:text-white">
+                            {entry.displayName}
+                          </span>
+                          {flagged && (
+                            <span className="inline-flex items-center gap-1 font-bold text-red-600 dark:text-red-400">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              {entry.flagReason || 'Sub-150ms speed run'}
+                            </span>
+                          )}
+                          {entry.isHidden && (
+                            <span className="font-bold text-slate-500 dark:text-slate-400">
+                              [Hidden]
+                            </span>
+                          )}
+                        </div>
+                        <p className="font-mono text-slate-600 dark:text-slate-400 tabular-nums">
+                          Score {entry.score} · {entry.accuracy.toFixed(0)}% ·{' '}
+                          {entry.avgResponseMs}ms/q · {entry.mode} ({entry.difficulty})
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void moderateLeaderboardEntry(entry.id, {
+                            isHidden: !entry.isHidden,
+                          })
+                        }
+                        className="min-h-[40px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 self-start sm:self-auto shrink-0"
+                      >
+                        {entry.isHidden ? (
+                          <>
+                            <Eye className="w-3.5 h-3.5 shrink-0" />
+                            Restore
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                            Hide
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Student Champions Moderation */}
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+            <div>
+              <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                Student Champions Moderation ({childLeaderboard.length})
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Hide or restore student champion cards from the public Home &amp; Leaderboard views.
+              </p>
+            </div>
+            {childLeaderboard.length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                No Student Champion scores recorded yet.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {childLeaderboard.slice(0, 18).map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 px-3 py-2.5 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-950 dark:text-white truncate">
+                        {entry.name} {entry.isHidden ? '(Hidden)' : ''}
+                      </p>
+                      <p className="font-mono text-slate-500 dark:text-slate-400 tabular-nums">
+                        {formatIndianClassLabel(entry.grade)} · {entry.totalScore} pts
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void moderateChildChampion(entry.id, !entry.isHidden)
+                      }
+                      className="min-h-[36px] px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                    >
+                      {entry.isHidden ? 'Restore' : 'Hide'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="space-y-4">
+            <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+              Agent Performance Leaderboard
+            </h2>
+            {agentLeaderboard.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center space-y-2">
               <Trophy className="w-7 h-7 text-amber-500 mx-auto" />
               <p className="text-base font-semibold text-slate-900 dark:text-white">
@@ -1197,6 +1926,7 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </>
           )}
+          </div>
         </div>
       )}
     </div>

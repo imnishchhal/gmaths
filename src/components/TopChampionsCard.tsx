@@ -81,7 +81,7 @@ export const TopChampionsCard: React.FC<TopChampionsCardProps> = ({
           Live rankings are currently offline. Complete a drill while connected
           to sync scores.
         </div>
-      ) : topChampions.length === 0 ? (
+      ) : topChampions.filter((e) => !e.isHidden).length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-5 text-center space-y-1.5">
           <Trophy className="w-6 h-6 text-amber-500 mx-auto" />
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -94,7 +94,10 @@ export const TopChampionsCard: React.FC<TopChampionsCardProps> = ({
         </div>
       ) : (
         <ol className="space-y-2.5">
-          {topChampions.slice(0, 3).map((entry, idx) => {
+          {topChampions
+            .filter((e) => !e.isHidden)
+            .slice(0, 3)
+            .map((entry, idx) => {
             const rank = RANK_CONFIG[idx] ?? RANK_CONFIG[2];
             const RankIcon = rank.icon;
             return (

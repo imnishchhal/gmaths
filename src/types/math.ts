@@ -41,6 +41,21 @@ export type AppView = 'play' | 'history' | 'leaderboard' | 'stats';
 
 export type GameState = 'SETUP' | 'PLAYING' | 'SUMMARY';
 
+export type DrillVariant = 'standard' | 'weak_spots' | 'daily_challenge';
+
+export interface CustomPreset {
+  id: string;
+  name: string;
+  mode: ArithmeticMode;
+  difficulty?: Difficulty;
+  indianClass: IndianClass;
+  sessionType: SessionType;
+  durationSec: SprintDuration;
+  allowNegatives: boolean;
+  autoSubmit: boolean;
+  createdAtMs: number;
+}
+
 export interface DrillConfig {
   mode: ArithmeticMode;
   difficulty: Difficulty;
@@ -49,6 +64,9 @@ export interface DrillConfig {
   durationSec: SprintDuration;
   allowNegatives: boolean;
   autoSubmit: boolean;
+  drillVariant?: DrillVariant;
+  dailySeed?: string;
+  adaptiveQueue?: MathProblem[];
 }
 
 export interface MathProblem {
@@ -93,6 +111,7 @@ export interface SessionRecord {
   createdAtMs: number;
   source: 'cloud' | 'local';
   attempts?: AttemptLog[];
+  drillVariant?: DrillVariant;
 }
 
 export interface LeaderboardRecord {
@@ -109,6 +128,9 @@ export interface LeaderboardRecord {
   avgResponseMs: number;
   qpm: number;
   updatedAtMs: number;
+  isHidden?: boolean;
+  isFlagged?: boolean;
+  flagReason?: string;
 }
 
 export const MODE_META: Record<

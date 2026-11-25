@@ -19,6 +19,7 @@ import {
   formatSessionDescriptor,
 } from '../types/math';
 import { generateProblem } from '../utils/problemGenerator';
+import { createSeededRng, getTodayDailySeedKey } from '../utils/seededRandom';
 import { soundEngine } from '../utils/sound';
 import { NumericKeypad } from './NumericKeypad';
 
@@ -63,15 +64,41 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   onExit,
   onBackToParent,
 }) => {
-  const [problem, setProblem] = useState<MathProblem>(() =>
-    generateProblem(
+  const isWeakSpotsDrill =
+    config.drillVariant === 'weak_spots' &&
+    Array.isArray(config.adaptiveQueue) &&
+    config.adaptiveQueue.length > 0;
+  const isDailyChallenge = config.drillVariant === 'daily_challenge';
+  const effectiveSessionType = isWeakSpotsDrill
+    ? 'practice'
+    : config.sessionType;
+
+  const seededRngRef = useRef<(() => number) | null>(
+    isDailyChallenge
+      ? createSeededRng(
+          getTodayDailySeedKey(
+            config.dailySeed ?? 'DAILY-2026',
+            config.indianClass
+          )
+        )
+      : null
+  );
+  const queueIndexRef = useRef<number>(0);
+  const [queueIndex, setQueueIndex] = useState<number>(0);
+
+  const [problem, setProblem] = useState<MathProblem>(() => {
+    if (isWeakSpotsDrill && config.adaptiveQueue) {
+      return { ...config.adaptiveQueue[0], presentedAt: performance.now() };
+    }
+    return generateProblem(
       config.mode,
       config.difficulty,
       config.allowNegatives,
       undefined,
-      config.indianClass
-    )
-  );
+      config.indianClass,
+      seededRngRef.current ?? Math.random
+    );
+  });
   const [inputValue, setInputValue] = useState<string>('');
   const [score, setScore] = useState<number>(0);
   const [attempted, setAttempted] = useState<number>(0);
@@ -145,8 +172,9 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
         mode: config.mode,
         difficulty: config.difficulty,
         grade: config.indianClass,
-        sessionType: config.sessionType,
-        durationSec: config.sessionType === 'sprint' ? config.durationSec : 0,
+        sessionType: effectiveSessionType,
+        durationSec:
+          effectiveSessionType === 'sprint' ? config.durationSec : 0,
         elapsedSec: Math.round(actualElapsedSec * 10) / 10,
         score: finalScore,
         attempted: finalAttempted,
@@ -156,6 +184,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
         avgResponseMs,
         qpm,
         allowNegatives: config.allowNegatives,
+        drillVariant: config.drillVariant ?? 'standard',
         createdAtMs: Date.now(),
         source: 'local',
         attempts: [...attemptsLogRef.current],
@@ -163,7 +192,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
 
       onComplete(record);
     },
-    [config, onComplete]
+    [config, effectiveSessionType, onComplete]
   );
 
   // High-precision wall-clock timer
@@ -174,7 +203,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       const elapsed = performance.now() - startTimeRef.current;
       setElapsedMs(elapsed);
 
-      if (config.sessionType === 'sprint') {
+      if (effectiveSessionType === 'sprint') {
         const remainingMs = config.durationSec * 1000 - elapsed;
         const remainingWholeSec = Math.ceil(remainingMs / 1000);
 
@@ -195,7 +224,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
     }, 50);
 
     return () => window.clearInterval(timer);
-  }, [config.durationSec, config.sessionType, finalizeSession]);
+  }, [config.durationSec, effectiveSessionType, finalizeSession]);
 
   // Auto-focus native input on desktop OR when onscreen keypad is toggled OFF
   useEffect(() => {
@@ -209,18 +238,46 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   }, [showOnscreenKeypad]);
 
   const advanceProblem = useCallback(() => {
+    if (isWeakSpotsDrill && config.adaptiveQueue) {
+      const nextIdx = queueIndexRef.current + 1;
+      if (nextIdx >= config.adaptiveQueue.length) {
+        window.setTimeout(() => finalizeSession(), 120);
+        return;
+      }
+      queueIndexRef.current = nextIdx;
+      setQueueIndex(nextIdx);
+      const next = {
+        ...config.adaptiveQueue[nextIdx],
+        presentedAt: performance.now(),
+      };
+      problemRef.current = next;
+      inputRef.current = '';
+      setProblem(next);
+      setInputValue('');
+      return;
+    }
+
     const next = generateProblem(
       config.mode,
       config.difficulty,
       config.allowNegatives,
       problemRef.current.signature,
-      config.indianClass
+      config.indianClass,
+      seededRngRef.current ?? Math.random
     );
     problemRef.current = next;
     inputRef.current = '';
     setProblem(next);
     setInputValue('');
-  }, [config.allowNegatives, config.difficulty, config.indianClass, config.mode]);
+  }, [
+    config.adaptiveQueue,
+    config.allowNegatives,
+    config.difficulty,
+    config.indianClass,
+    config.mode,
+    finalizeSession,
+    isWeakSpotsDrill,
+  ]);
 
   const recordAttempt = useCallback(
     (outcome: 'correct' | 'wrong' | 'skipped', submittedText: string) => {
@@ -282,14 +339,14 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               : `Incorrect · Answer was ${current.answer}`,
         });
 
-        if (config.sessionType === 'streak') {
+        if (effectiveSessionType === 'streak') {
           window.setTimeout(() => finalizeSession(), 240);
           return;
         }
         advanceProblem();
       }
     },
-    [advanceProblem, config.sessionType, finalizeSession]
+    [advanceProblem, effectiveSessionType, finalizeSession]
   );
 
   const evaluateValue = useCallback(
@@ -458,21 +515,29 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
   ]);
 
   const remainingMs =
-    config.sessionType === 'sprint'
+    effectiveSessionType === 'sprint'
       ? Math.max(0, config.durationSec * 1000 - elapsedMs)
       : elapsedMs;
   const displayClock =
-    config.sessionType === 'sprint'
+    effectiveSessionType === 'sprint'
       ? `${(remainingMs / 1000).toFixed(1)}s`
       : `${Math.floor(elapsedMs / 1000)}s`;
   const progressPct =
-    config.sessionType === 'sprint'
+    effectiveSessionType === 'sprint'
       ? Math.max(
           0,
           Math.min(100, (remainingMs / (config.durationSec * 1000)) * 100)
         )
+      : isWeakSpotsDrill && config.adaptiveQueue
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            ((queueIndex + 1) / config.adaptiveQueue.length) * 100
+          )
+        )
       : 100;
-  const isLowTime = config.sessionType === 'sprint' && remainingMs <= 10000;
+  const isLowTime = effectiveSessionType === 'sprint' && remainingMs <= 10000;
 
   const liveAccuracy =
     attempted > 0 ? Math.round((score / attempted) * 100) : 100;
@@ -507,7 +572,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (config.sessionType === 'practice' && attempted > 0) {
+                  if (effectiveSessionType === 'practice' && attempted > 0) {
                     finalizeSession();
                   } else {
                     onExit();
@@ -517,22 +582,24 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               >
                 <X className="w-4 h-4 shrink-0" />
                 <span>
-                  {config.sessionType === 'practice' && attempted > 0
+                  {effectiveSessionType === 'practice' && attempted > 0
                     ? 'Finish'
                     : 'Exit'}
                 </span>
               </button>
             )}
 
-            {onBackToParent && config.sessionType === 'practice' && attempted > 0 && (
-              <button
-                type="button"
-                onClick={() => finalizeSession()}
-                className="inline-flex items-center justify-center min-h-[44px] px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap shrink-0"
-              >
-                Finish
-              </button>
-            )}
+            {onBackToParent &&
+              effectiveSessionType === 'practice' &&
+              attempted > 0 && (
+                <button
+                  type="button"
+                  onClick={() => finalizeSession()}
+                  className="inline-flex items-center justify-center min-h-[44px] px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap shrink-0"
+                >
+                  Finish
+                </button>
+              )}
           </div>
 
           {/* Center: High-Contrast Tabular Timer */}
@@ -605,12 +672,16 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           </div>
         </div>
 
-        {/* Hairline Sprint Progress Bar */}
-        {config.sessionType === 'sprint' && (
+        {/* Hairline Sprint / Weak-Spot Progress Bar */}
+        {(effectiveSessionType === 'sprint' || isWeakSpotsDrill) && (
           <div className="h-1 w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
             <div
               className={`h-full transition-transform duration-100 origin-left ${
-                isLowTime ? 'bg-red-500' : 'bg-blue-600 dark:bg-blue-500'
+                isLowTime
+                  ? 'bg-red-500'
+                  : isWeakSpotsDrill
+                  ? 'bg-emerald-600 dark:bg-emerald-500'
+                  : 'bg-blue-600 dark:bg-blue-500'
               }`}
               style={{ transform: `scaleX(${progressPct / 100})` }}
             />
@@ -624,13 +695,26 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           {/* Quiet Preset & Student Context */}
           <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
             {activeStudentLabel ? `${activeStudentLabel} · ` : ''}
-            {formatSessionDescriptor(
-              config.mode,
-              config.difficulty,
-              config.sessionType,
-              config.durationSec,
-              config.indianClass
-            )}
+            {isWeakSpotsDrill && config.adaptiveQueue
+              ? `Adaptive Weak-Spot Drill · Question ${Math.min(
+                  queueIndex + 1,
+                  config.adaptiveQueue.length
+                )} of ${config.adaptiveQueue.length}`
+              : isDailyChallenge
+              ? `Daily Challenge (${config.dailySeed || 'Today'}) · ${formatSessionDescriptor(
+                  config.mode,
+                  config.difficulty,
+                  effectiveSessionType,
+                  config.durationSec,
+                  config.indianClass
+                )}`
+              : formatSessionDescriptor(
+                  config.mode,
+                  config.difficulty,
+                  effectiveSessionType,
+                  config.durationSec,
+                  config.indianClass
+                )}
           </p>
 
           {/* Dominant Arithmetic Problem */}

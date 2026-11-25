@@ -4,13 +4,25 @@ import {
   Check,
   Cloud,
   HardDrive,
+  Lightbulb,
+  Lock,
   RotateCcw,
   SlidersHorizontal,
+  Target,
   Trophy,
   X,
 } from 'lucide-react';
 import { useFirebase } from '../context/FirebaseContext';
-import { SessionRecord, formatSessionDescriptor } from '../types/math';
+import { usePlatform } from '../context/PlatformContext';
+import {
+  MathProblem,
+  SessionRecord,
+  formatSessionDescriptor,
+} from '../types/math';
+import {
+  buildAdaptiveWeakSpotQueue,
+  selectTopWeakSpotInsights,
+} from '../utils/mentalMathTips';
 
 interface SessionSummaryViewProps {
   session: SessionRecord;
@@ -20,6 +32,7 @@ interface SessionSummaryViewProps {
   onPlayAgain: () => void;
   onBackToSetup: () => void;
   onBackToParent?: () => void;
+  onStartWeakSpotsDrill?: (queue: MathProblem[]) => void;
   activeStudentLabel?: string;
 }
 
@@ -33,9 +46,12 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
   onPlayAgain,
   onBackToSetup,
   onBackToParent,
+  onStartWeakSpotsDrill,
   activeStudentLabel,
 }) => {
   const { user, isConfigured, signInWithGoogle } = useFirebase();
+  const { isProSubscriber, freeAdaptiveUsedCount, openCheckoutModal } =
+    usePlatform();
   const [logFilter, setLogFilter] = useState<LogFilter>('all');
 
   useEffect(() => {
@@ -53,7 +69,29 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onPlayAgain]);
 
-  const attempts = session.attempts ?? [];
+  const attempts = useMemo(() => session.attempts ?? [], [session.attempts]);
+
+  const weakSpotInsights = useMemo(
+    () => selectTopWeakSpotInsights(attempts, 3),
+    [attempts]
+  );
+
+  const canLaunchFreeAdaptive = isProSubscriber || freeAdaptiveUsedCount < 1;
+
+  const handlePracticeWeakSpots = () => {
+    if (!canLaunchFreeAdaptive) {
+      openCheckoutModal('plan');
+      return;
+    }
+    const queue = buildAdaptiveWeakSpotQueue(
+      attempts,
+      session.allowNegatives,
+      5
+    );
+    if (queue.length > 0 && onStartWeakSpotsDrill) {
+      onStartWeakSpotsDrill(queue);
+    }
+  };
 
   const filteredAttempts = useMemo(() => {
     if (logFilter === 'missed') {
@@ -82,13 +120,19 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
               </p>
             )}
             <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
-              {formatSessionDescriptor(
-                session.mode,
-                session.difficulty,
-                session.sessionType,
-                session.durationSec,
-                session.grade
-              )}
+              {session.drillVariant === 'weak_spots'
+                ? 'Adaptive Weak-Spot Drill (5 Qs)'
+                : session.drillVariant === 'daily_challenge'
+                ? 'Daily Challenge · '
+                : ''}
+              {session.drillVariant !== 'weak_spots' &&
+                formatSessionDescriptor(
+                  session.mode,
+                  session.difficulty,
+                  session.sessionType,
+                  session.durationSec,
+                  session.grade
+                )}
             </p>
             <div className="flex flex-wrap items-baseline gap-4">
               <h1 className="font-mono text-5xl sm:text-6xl font-bold tracking-tight text-slate-950 dark:text-white tabular-nums">
@@ -217,6 +261,88 @@ export const SessionSummaryView: React.FC<SessionSummaryViewProps> = ({
           )}
         </div>
       </section>
+
+      {/* Top 3 Slowest / Missed Problems & Adaptive Weak-Spot Drill */}
+      {weakSpotInsights.length > 0 && (
+        <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
+                <Lightbulb className="w-4 h-4 shrink-0" />
+                <span>Post-Round Speed Coach</span>
+              </div>
+              <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                Top {weakSpotInsights.length} Focus Areas &amp; Mental Math Tips
+              </h2>
+            </div>
+
+            {onStartWeakSpotsDrill && (
+              <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handlePracticeWeakSpots}
+                  className={`min-h-[46px] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center gap-2 transition-colors whitespace-nowrap ${
+                    canLaunchFreeAdaptive
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:bg-slate-800 dark:hover:bg-slate-100'
+                  }`}
+                >
+                  {canLaunchFreeAdaptive ? (
+                    <Target className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <Lock className="w-4 h-4 shrink-0" />
+                  )}
+                  Practice Weak Spots (5 Qs)
+                </button>
+                {!isProSubscriber && (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {freeAdaptiveUsedCount < 1
+                      ? '1 free adaptive drill available'
+                      : 'Unlimited drills included in Annual Pro'}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {weakSpotInsights.map((item, idx) => (
+              <article
+                key={`${item.attempt.problemId}_tip_${idx}`}
+                className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-4 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={`text-[11px] font-bold uppercase tracking-wider ${
+                      item.rankReason === 'missed'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-amber-600 dark:text-amber-400'
+                    }`}
+                  >
+                    {item.rankReason === 'missed' ? 'Missed' : 'Slowest'}
+                  </span>
+                  <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums">
+                    {(item.attempt.responseMs / 1000).toFixed(2)}s
+                  </span>
+                </div>
+
+                <p className="font-mono text-lg font-bold text-slate-950 dark:text-white tabular-nums">
+                  {item.attempt.expression} = {item.attempt.expected}
+                </p>
+
+                <div className="pt-1.5 border-t border-slate-200/70 dark:border-slate-800 space-y-0.5">
+                  <p className="text-xs font-bold text-blue-700 dark:text-blue-400">
+                    {item.tipTitle}
+                  </p>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {item.tipDetail}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Question-by-Question Review Table */}
       {attempts.length > 0 && (

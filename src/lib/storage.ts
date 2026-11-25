@@ -22,6 +22,7 @@ import {
   SessionType,
   getPresetKey,
 } from '../types/math';
+import { isSuspiciousSpeedRun } from '../types/platform';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import {
   buildLeaderboardEntryId,
@@ -255,6 +256,11 @@ export async function saveSessionToCloud(
     handleFirestoreError(error, OperationType.GET, leaderboardPath);
   }
 
+  const flagged = isSuspiciousSpeedRun(sanitized.avgResponseMs, sanitized.score);
+  const flagReason = flagged
+    ? `Suspicious speed: ${sanitized.avgResponseMs}ms avg across ${sanitized.score} solved`
+    : '';
+
   if (!existingEntry.exists()) {
     try {
       await setDoc(leaderboardRef, {
@@ -271,6 +277,9 @@ export async function saveSessionToCloud(
         avgResponseMs: sanitized.avgResponseMs,
         qpm: sanitized.qpm,
         isPublic: true,
+        isHidden: false,
+        isFlagged: flagged,
+        flagReason,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -295,6 +304,8 @@ export async function saveSessionToCloud(
           bestStreak: sanitized.bestStreak,
           avgResponseMs: sanitized.avgResponseMs,
           qpm: sanitized.qpm,
+          isFlagged: flagged || Boolean(prev.isFlagged),
+          flagReason: flagged ? flagReason : String(prev.flagReason ?? ''),
           updatedAt: serverTimestamp(),
         });
         return { leaderboardUpdated: true };
@@ -305,6 +316,28 @@ export async function saveSessionToCloud(
   }
 
   return { leaderboardUpdated: false };
+}
+
+export async function cloudUpdateLeaderboardModeration(
+  entryId: string,
+  patch: { isHidden?: boolean; isFlagged?: boolean; flagReason?: string }
+): Promise<void> {
+  if (!db) return;
+  const safeId = sanitizeId(entryId, 'lb');
+  const path = `leaderboard/${safeId}`;
+  const payload: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (typeof patch.isHidden === 'boolean') payload.isHidden = patch.isHidden;
+  if (typeof patch.isFlagged === 'boolean') payload.isFlagged = patch.isFlagged;
+  if (typeof patch.flagReason === 'string') {
+    payload.flagReason = patch.flagReason.slice(0, 160);
+  }
+  try {
+    await updateDoc(doc(db, 'leaderboard', safeId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
 }
 
 export async function deleteCloudSession(
@@ -404,6 +437,9 @@ export function subscribeLeaderboard(
           bestStreak: Number(d.bestStreak ?? 0),
           avgResponseMs: Number(d.avgResponseMs ?? 0),
           qpm: Number(d.qpm ?? 0),
+          isHidden: Boolean(d.isHidden),
+          isFlagged: Boolean(d.isFlagged),
+          flagReason: typeof d.flagReason === 'string' ? d.flagReason : '',
           updatedAtMs: timestampToMs(d.updatedAt ?? d.createdAt),
         };
       });

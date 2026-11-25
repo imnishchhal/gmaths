@@ -1,20 +1,27 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowRight,
+  Bookmark,
+  Calendar,
   Cloud,
+  Crown,
   GraduationCap,
   HardDrive,
   Lock,
   Moon,
   Play,
+  Sparkles,
   Sun,
+  Trash2,
   Trophy,
   Volume2,
   VolumeX,
 } from 'lucide-react';
 import { useFirebase } from '../context/FirebaseContext';
+import { usePlatform } from '../context/PlatformContext';
 import {
   ArithmeticMode,
+  CustomPreset,
   DrillConfig,
   INDIAN_CLASSES,
   INDIAN_CLASS_META,
@@ -29,12 +36,18 @@ import {
   getAllowedModesForClass,
   getPresetKey,
 } from '../types/math';
+import {
+  ANNUAL_PLAN_PRICE_INR,
+  formatCurrency,
+  formatIsoDate,
+} from '../types/platform';
 import { TopChampionsCard } from './TopChampionsCard';
 
 interface DrillSetupProps {
   config: DrillConfig;
   onChangeConfig: (next: DrillConfig) => void;
   onStart: () => void;
+  onStartDailyChallenge?: () => void;
   onOpenHistory: () => void;
   onOpenLeaderboard: () => void;
   muted: boolean;
@@ -59,6 +72,7 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
   config,
   onChangeConfig,
   onStart,
+  onStartDailyChallenge,
   onOpenHistory,
   onOpenLeaderboard,
   muted,
@@ -68,6 +82,17 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
 }) => {
   const { user, isConfigured, sessions, personalBests, signInWithGoogle } =
     useFirebase();
+  const {
+    isProSubscriber,
+    myStudentSubscription,
+    customPresets,
+    saveCustomPreset,
+    deleteCustomPreset,
+    openCheckoutModal,
+    appConfig,
+  } = usePlatform();
+
+  const [presetName, setPresetName] = useState('');
 
   const classMeta = INDIAN_CLASS_META[config.indianClass];
   const allowedModes = getAllowedModesForClass(config.indianClass);
@@ -149,7 +174,34 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
         </div>
 
         {/* Utility Toolbar Controls */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {isProSubscriber ? (
+            <button
+              type="button"
+              onClick={() => openCheckoutModal('plan')}
+              title={
+                myStudentSubscription
+                  ? `Pro valid until ${formatIsoDate(
+                      myStudentSubscription.expiryDate
+                    )}`
+                  : 'Annual Pro Active'
+              }
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 py-2 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-xs sm:text-sm font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap shrink-0"
+            >
+              <Crown className="w-4 h-4 shrink-0" />
+              Pro Active
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openCheckoutModal('plan')}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs sm:text-sm font-bold transition-colors whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="w-4 h-4 shrink-0" />
+              Unlock Pro ({formatCurrency(ANNUAL_PLAN_PRICE_INR)}/yr)
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onToggleMute}
@@ -451,7 +503,7 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
           </div>
 
           {/* Dominant Single Primary CTA */}
-          <div className="pt-2 space-y-2.5">
+          <div className="pt-2 space-y-3">
             <button
               type="button"
               onClick={onStart}
@@ -460,6 +512,31 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
               <Play className="w-5 h-5 fill-current" />
               {startLabel}
             </button>
+
+            {onStartDailyChallenge && (
+              <div className="rounded-xl border border-amber-200/80 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/25 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-300">
+                    <Calendar className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      Daily Challenge · Seed {appConfig.dailyChallengeSeed}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Same deterministic 60s question sequence for everyone in{' '}
+                    {classMeta.fullLabel}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onStartDailyChallenge}
+                  className="min-h-[44px] px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:bg-slate-800 dark:hover:bg-slate-100 text-xs font-bold whitespace-nowrap shrink-0"
+                >
+                  Play Daily Challenge
+                </button>
+              </div>
+            )}
+
             <p className="text-center text-xs text-slate-500 dark:text-slate-400">
               Press{' '}
               <kbd className="font-mono font-semibold text-slate-700 dark:text-slate-300">
@@ -467,6 +544,105 @@ export const DrillSetup: React.FC<DrillSetupProps> = ({
               </kbd>{' '}
               to launch · Exact integer problems only
             </p>
+          </div>
+
+          {/* Custom Presets (Pro Feature) */}
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                <Bookmark className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span>Custom Saved Presets</span>
+              </div>
+              {!isProSubscriber && (
+                <button
+                  type="button"
+                  onClick={() => openCheckoutModal('plan')}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  <Lock className="w-3 h-3 shrink-0" />
+                  Unlock with Annual Pro
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="Name this setup (e.g. Tables Sprint)"
+                className="flex-1 min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isProSubscriber) {
+                    openCheckoutModal('plan');
+                    return;
+                  }
+                  const trimmed = presetName.trim();
+                  if (!trimmed) return;
+                  saveCustomPreset(trimmed, config);
+                  setPresetName('');
+                }}
+                className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                {!isProSubscriber && <Lock className="w-3.5 h-3.5 shrink-0" />}
+                Save Preset
+              </button>
+            </div>
+
+            {customPresets.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {customPresets.map((preset: CustomPreset) => (
+                  <div
+                    key={preset.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 px-3 py-2 flex items-center justify-between gap-2"
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChangeConfig({
+                          ...config,
+                          mode: coerceModeForClass(
+                            preset.mode,
+                            preset.indianClass
+                          ),
+                          indianClass: preset.indianClass,
+                          difficulty:
+                            preset.difficulty ??
+                            INDIAN_CLASS_META[preset.indianClass].mappedDifficulty,
+                          sessionType: preset.sessionType,
+                          durationSec: preset.durationSec,
+                          allowNegatives: preset.allowNegatives,
+                          autoSubmit: preset.autoSubmit,
+                        })
+                      }
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <span className="block text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {preset.name}
+                      </span>
+                      <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                        {formatIndianClassLabel(preset.indianClass)} ·{' '}
+                        {MODE_META[preset.mode].shortLabel} ·{' '}
+                        {preset.sessionType === 'sprint'
+                          ? `${preset.durationSec}s`
+                          : SESSION_TYPE_META[preset.sessionType].label}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteCustomPreset(preset.id)}
+                      aria-label={`Delete preset ${preset.name}`}
+                      className="min-h-[36px] min-w-[36px] rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 

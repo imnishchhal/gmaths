@@ -7,11 +7,13 @@ import {
   GraduationCap,
   History,
   Lock,
+  Megaphone,
   Phone,
   Trophy,
   X,
 } from 'lucide-react';
 import { ActiveDrill } from './components/ActiveDrill';
+import { CheckoutModal } from './components/CheckoutModal';
 import { DrillSetup } from './components/DrillSetup';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Header } from './components/Header';
@@ -32,6 +34,7 @@ import {
   DrillConfig,
   GameState,
   INDIAN_CLASS_META,
+  MathProblem,
   SessionRecord,
   SessionType,
   coerceModeForClass,
@@ -44,6 +47,7 @@ import {
   PlatformRoute,
   evaluateSubscriptionState,
   formatIsoDate,
+  getAgentApprovalStatus,
 } from './types/platform';
 import { soundEngine } from './utils/sound';
 
@@ -116,6 +120,7 @@ function resolveRouteFromLocation(): PlatformRoute {
 
 const MathSpeedsterShell: React.FC = () => {
   const {
+    user,
     personalBests,
     recordCompletedSession,
     authError,
@@ -128,6 +133,11 @@ const MathSpeedsterShell: React.FC = () => {
     autoRouteEvent,
     platformError,
     dismissPlatformError,
+    appConfig,
+    isProSubscriber,
+    capturedReferralCode,
+    markFreeAdaptiveUsed,
+    recordTrialLeadIfReferred,
     exitChildModeToParent,
     recordChildPractice,
     getAgentById,
@@ -143,6 +153,8 @@ const MathSpeedsterShell: React.FC = () => {
   const [drillRunKey, setDrillRunKey] = useState<number>(1);
   const [muted, setMuted] = useState<boolean>(() => soundEngine.isMuted());
   const [darkMode, setDarkMode] = useState<boolean>(loadInitialTheme);
+  const [dismissedAnnouncementText, setDismissedAnnouncementText] =
+    useState<string>('');
   const lastHandledAutoRouteSeqRef = useRef<number>(0);
 
   const [lastSummary, setLastSummary] = useState<{
@@ -151,6 +163,18 @@ const MathSpeedsterShell: React.FC = () => {
     savedToCloud: boolean;
     leaderboardUpdated: boolean;
   } | null>(null);
+
+  // Record referred trial signup if signed in with a captured ?ref= code
+  useEffect(() => {
+    if (user?.email && capturedReferralCode) {
+      void recordTrialLeadIfReferred(user.displayName || '', user.email);
+    }
+  }, [
+    user?.email,
+    user?.displayName,
+    capturedReferralCode,
+    recordTrialLeadIfReferred,
+  ]);
 
   // Sync dark mode class on <html>
   useEffect(() => {
@@ -230,9 +254,15 @@ const MathSpeedsterShell: React.FC = () => {
   );
 
   const handleConfigChange = useCallback((next: DrillConfig) => {
-    setConfig(next);
+    const cleaned: DrillConfig = {
+      ...next,
+      drillVariant: 'standard',
+      adaptiveQueue: undefined,
+      dailySeed: undefined,
+    };
+    setConfig(cleaned);
     try {
-      window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(next));
+      window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cleaned));
     } catch {
       // Ignore storage error
     }
@@ -249,11 +279,72 @@ const MathSpeedsterShell: React.FC = () => {
 
   const handleStartDrill = useCallback(() => {
     if (isChildPracticeBlocked) return;
+    setConfig((prev) =>
+      prev.drillVariant && prev.drillVariant !== 'standard'
+        ? {
+            ...prev,
+            drillVariant: 'standard',
+            adaptiveQueue: undefined,
+            dailySeed: undefined,
+          }
+        : prev
+    );
     setRoute('/');
     setActiveView('play');
     setDrillRunKey((k) => k + 1);
     setGameState('PLAYING');
   }, [isChildPracticeBlocked]);
+
+  const handleStartDailyChallenge = useCallback(() => {
+    if (isChildPracticeBlocked) return;
+    setConfig((prev) => ({
+      ...prev,
+      mode: coerceModeForClass('mixed', prev.indianClass),
+      sessionType: 'sprint',
+      durationSec: 60,
+      drillVariant: 'daily_challenge',
+      dailySeed: appConfig.dailyChallengeSeed,
+      adaptiveQueue: undefined,
+    }));
+    setRoute('/');
+    setActiveView('play');
+    setDrillRunKey((k) => k + 1);
+    setGameState('PLAYING');
+  }, [appConfig.dailyChallengeSeed, isChildPracticeBlocked]);
+
+  const handleStartWeakSpotsDrill = useCallback(
+    (queue: MathProblem[]) => {
+      if (isChildPracticeBlocked || queue.length === 0) return;
+      if (!isProSubscriber) {
+        markFreeAdaptiveUsed();
+      }
+      setConfig((prev) => ({
+        ...prev,
+        drillVariant: 'weak_spots',
+        adaptiveQueue: queue,
+        dailySeed: undefined,
+      }));
+      setRoute('/');
+      setActiveView('play');
+      setDrillRunKey((k) => k + 1);
+      setGameState('PLAYING');
+    },
+    [isChildPracticeBlocked, isProSubscriber, markFreeAdaptiveUsed]
+  );
+
+  const handleReplayFromSummary = useCallback(() => {
+    if (isChildPracticeBlocked) return;
+    if (lastSummary?.session.drillVariant === 'daily_challenge') {
+      handleStartDailyChallenge();
+      return;
+    }
+    handleStartDrill();
+  }, [
+    handleStartDailyChallenge,
+    handleStartDrill,
+    isChildPracticeBlocked,
+    lastSummary?.session.drillVariant,
+  ]);
 
   // One-tap switch from Parent Dashboard: calibrate difficulty to child's Indian class & start immediately
   const handleStartChildPractice = useCallback(
@@ -266,6 +357,9 @@ const MathSpeedsterShell: React.FC = () => {
         mode: coerceModeForClass(config.mode, child.grade),
         allowNegatives:
           meta.allowNegativesAvailable && config.allowNegatives,
+        drillVariant: 'standard',
+        adaptiveQueue: undefined,
+        dailySeed: undefined,
       };
       handleConfigChange(calibrated);
       setRoute('/');
@@ -305,6 +399,9 @@ const MathSpeedsterShell: React.FC = () => {
         indianClass: defaultClass,
         sessionType,
         durationSec,
+        drillVariant: 'standard',
+        adaptiveQueue: undefined,
+        dailySeed: undefined,
       };
       handleConfigChange(next);
       setRoute('/');
@@ -393,7 +490,9 @@ const MathSpeedsterShell: React.FC = () => {
     roleSession?.role === 'agent'
       ? getAgentById(roleSession.accountId)
       : undefined;
-  const isAgentAuthed = Boolean(activeAgent && activeAgent.isActive);
+  const isAgentAuthed = Boolean(
+    activeAgent && getAgentApprovalStatus(activeAgent) !== 'suspended'
+  );
   const activeParent =
     roleSession?.role === 'parent'
       ? getParentById(roleSession.accountId)
@@ -430,6 +529,32 @@ const MathSpeedsterShell: React.FC = () => {
         activeView={activeView}
         onNavigateRoute={handleNavigateRoute}
       />
+
+      {/* Site-Wide Admin Announcement Banner */}
+      {appConfig.announcementEnabled &&
+        appConfig.announcementText.trim().length > 0 &&
+        dismissedAnnouncementText !== appConfig.announcementText && (
+          <div className="w-full bg-indigo-600 dark:bg-indigo-900 text-white border-b border-indigo-500/40">
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex items-center justify-between gap-3 text-xs sm:text-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <Megaphone className="w-4 h-4 shrink-0" />
+                <span className="font-medium break-words">
+                  {appConfig.announcementText}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setDismissedAnnouncementText(appConfig.announcementText)
+                }
+                aria-label="Dismiss announcement"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white/15 shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
       {/* Active Student Mode Context Bar */}
       {activeChild && route === '/' && (
@@ -626,6 +751,7 @@ const MathSpeedsterShell: React.FC = () => {
               config={config}
               onChangeConfig={handleConfigChange}
               onStart={handleStartDrill}
+              onStartDailyChallenge={handleStartDailyChallenge}
               onOpenHistory={() => setActiveView('history')}
               onOpenLeaderboard={() => setActiveView('leaderboard')}
               muted={muted}
@@ -645,11 +771,12 @@ const MathSpeedsterShell: React.FC = () => {
               isNewPersonalBest={lastSummary.isNewPersonalBest}
               savedToCloud={lastSummary.savedToCloud}
               leaderboardUpdated={lastSummary.leaderboardUpdated}
-              onPlayAgain={handleStartDrill}
+              onPlayAgain={handleReplayFromSummary}
               onBackToSetup={() => setGameState('SETUP')}
               onBackToParent={
                 activeChild ? handleBackToParentPortal : undefined
               }
+              onStartWeakSpotsDrill={handleStartWeakSpotsDrill}
               activeStudentLabel={
                 activeChild
                   ? `${activeChild.name} · ${formatIndianClassLabel(activeChild.grade)}`
@@ -670,6 +797,8 @@ const MathSpeedsterShell: React.FC = () => {
           <StatsView onStartDrill={handleStartDrill} />
         )}
       </main>
+
+      <CheckoutModal />
     </div>
   );
 };

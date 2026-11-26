@@ -18,10 +18,7 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import {
-  buildAgentAuthEmail,
-  buildParentAuthEmail,
-} from '../utils/referral';
+import { buildAgentAuthEmail } from '../utils/referral';
 import {
   auth,
   googleProvider,
@@ -98,11 +95,7 @@ function shouldFallbackToRedirect(err: unknown): boolean {
   );
 }
 
-export function formatCredentialAuthError(
-  err: unknown,
-  portalLabel = 'Agent',
-  idLabel = 'phone number'
-): {
+export function formatPhoneAuthError(err: unknown): {
   code: string;
   message: string;
 } {
@@ -110,18 +103,18 @@ export function formatCredentialAuthError(
   if (
     code === 'auth/invalid-credential' ||
     code === 'auth/wrong-password' ||
-    code === 'auth/user-not-found' ||
-    code === 'auth/invalid-email'
+    code === 'auth/user-not-found'
   ) {
     return {
       code,
-      message: `Incorrect ${idLabel} or password. Please check and try again.`,
+      message: 'Incorrect phone number or password. Please check and try again.',
     };
   }
   if (code === 'auth/email-already-in-use') {
     return {
       code,
-      message: `A ${portalLabel} login for this ${idLabel} already exists. Sign in with your ${idLabel} and password.`,
+      message:
+        'An Agent login for this phone number already exists. Sign in with your phone number and password.',
     };
   }
   if (code === 'auth/weak-password') {
@@ -145,25 +138,19 @@ export function formatCredentialAuthError(
   if (code === 'auth/requires-recent-login') {
     return {
       code,
-      message: `Please sign out and sign back in with your ${idLabel} and password before changing your password.`,
+      message:
+        'Please sign out and sign back in with your phone number and password before changing your password.',
     };
   }
   if (code === 'auth/operation-not-allowed') {
     return {
       code,
       message:
-        'Password login requires Email/Password sign-in to be enabled in Firebase Console → Authentication → Sign-in method.',
+        'Phone & Password login requires Email/Password sign-in to be enabled in Firebase Console → Authentication → Sign-in method.',
     };
   }
   const raw = err instanceof Error ? err.message : String(err);
-  return { code, message: raw || `Unable to sign in with ${idLabel} and password.` };
-}
-
-export function formatPhoneAuthError(err: unknown): {
-  code: string;
-  message: string;
-} {
-  return formatCredentialAuthError(err, 'Agent', 'phone number');
+  return { code, message: raw || 'Unable to sign in with phone and password.' };
 }
 
 export interface PhoneAuthOutcome {
@@ -198,15 +185,6 @@ interface FirebaseContextValue {
   signInWithGoogle: () => Promise<User | null>;
   signInWithGoogleRedirect: () => Promise<void>;
   signInWithPhoneCredentials: (
-    phone: string,
-    password: string
-  ) => Promise<PhoneAuthOutcome>;
-  signInWithEmailPassword: (
-    email: string,
-    password: string,
-    portalLabel?: string
-  ) => Promise<PhoneAuthOutcome>;
-  signInWithParentPhoneCredentials: (
     phone: string,
     password: string
   ) => Promise<PhoneAuthOutcome>;
@@ -536,98 +514,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     []
   );
 
-  const signInWithEmailPassword = useCallback(
-    async (
-      email: string,
-      password: string,
-      portalLabel = 'Parent'
-    ): Promise<PhoneAuthOutcome> => {
-      if (!auth) {
-        return {
-          user: null,
-          error: 'Firebase Authentication is not configured.',
-        };
-      }
-      const cleanEmail = email.trim().toLowerCase();
-      if (!cleanEmail || !cleanEmail.includes('@')) {
-        return {
-          user: null,
-          error: 'Enter a valid email address.',
-        };
-      }
-      if (!password || password.length < 4) {
-        return {
-          user: null,
-          error: 'Enter your password.',
-        };
-      }
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const credential = await signInWithEmailAndPassword(
-          auth,
-          cleanEmail,
-          password
-        );
-        setAuthLoading(false);
-        return { user: credential.user };
-      } catch (err) {
-        const formatted = formatCredentialAuthError(err, portalLabel, 'email');
-        setAuthLoading(false);
-        return {
-          user: null,
-          code: formatted.code,
-          error: formatted.message,
-        };
-      }
-    },
-    []
-  );
-
-  const signInWithParentPhoneCredentials = useCallback(
-    async (phone: string, password: string): Promise<PhoneAuthOutcome> => {
-      if (!auth) {
-        return {
-          user: null,
-          error: 'Firebase Authentication is not configured.',
-        };
-      }
-      const authEmail = buildParentAuthEmail(phone);
-      if (!authEmail) {
-        return {
-          user: null,
-          error: 'Enter a valid mobile phone number (at least 7 digits).',
-        };
-      }
-      if (!password || password.length < 4) {
-        return {
-          user: null,
-          error: 'Enter your parent password.',
-        };
-      }
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const credential = await signInWithEmailAndPassword(
-          auth,
-          authEmail,
-          password
-        );
-        setAuthLoading(false);
-        return { user: credential.user };
-      } catch (err) {
-        const formatted = formatCredentialAuthError(err, 'Parent', 'mobile number');
-        setAuthLoading(false);
-        return {
-          user: null,
-          code: formatted.code,
-          error: formatted.message,
-        };
-      }
-    },
-    []
-  );
-
   const signUpWithPhoneCredentials = useCallback(
     async (
       phone: string,
@@ -835,8 +721,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogle,
       signInWithGoogleRedirect,
       signInWithPhoneCredentials,
-      signInWithEmailPassword,
-      signInWithParentPhoneCredentials,
       signUpWithPhoneCredentials,
       changeCurrentPassword,
       signOutUser,
@@ -865,8 +749,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogle,
       signInWithGoogleRedirect,
       signInWithPhoneCredentials,
-      signInWithEmailPassword,
-      signInWithParentPhoneCredentials,
       signUpWithPhoneCredentials,
       changeCurrentPassword,
       signOutUser,

@@ -86,29 +86,9 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       workspaceId: 'gmaths_main',
       ownerUid: 'agent_uid',
       name: 'Parent One',
-      contact: '9811223344',
+      contact: 'parent1@example.com',
       email: 'parent1@example.com',
-      phoneAuthEmail: 'parent.9811223344@gmaths.local',
-      passwordAuthEnabled: true,
       passcodeHash: 'b'.repeat(64),
-      createdByAgentId: 'ag_1',
-      agentEmail: 'agent1@example.com',
-      agentName: 'Field Agent One',
-      agentPhone: '9876543210',
-      agentArea: 'North Zone',
-      agentCode: 'AG01',
-      createdAt: SERVER_TIME,
-      updatedAt: SERVER_TIME,
-    },
-    par_google_only: {
-      id: 'par_google_only',
-      workspaceId: 'gmaths_main',
-      ownerUid: 'agent_uid',
-      name: 'Google Only Parent',
-      contact: '9800000001',
-      email: 'googleparent@example.com',
-      passwordAuthEnabled: false,
-      passcodeHash: 'g'.repeat(64),
       createdByAgentId: 'ag_1',
       agentEmail: 'agent1@example.com',
       agentName: 'Field Agent One',
@@ -127,8 +107,6 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       parentId: 'par_1',
       createdByAgentId: 'ag_1',
       parentEmail: 'parent1@example.com',
-      parentPhoneEmail: 'parent.9811223344@gmaths.local',
-      passwordAuthEnabled: true,
       agentEmail: 'agent1@example.com',
       name: 'Aarav',
       grade: '3rd',
@@ -139,23 +117,7 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       updatedAt: SERVER_TIME,
     },
   },
-  childLeaderboard: {
-    ch_1: {
-      id: 'ch_1',
-      childId: 'ch_1',
-      workspaceId: 'gmaths_main',
-      ownerUid: 'parent_uid',
-      name: 'Aarav',
-      grade: '3rd',
-      totalScore: 42,
-      sessionsCount: 3,
-      bestStreak: 11,
-      isPublic: true,
-      isHidden: false,
-      createdAt: SERVER_TIME,
-      updatedAt: SERVER_TIME,
-    },
-  },
+  childLeaderboard: {},
   leaderboard: {
     lb_1: {
       id: 'lb_1',
@@ -307,23 +269,8 @@ const isPhoneAgentAuth = (auth: AuthContext) =>
       /^agent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
       auth.sign_in_provider === 'password'
   );
-const isPhoneParentAuth = (auth: AuthContext) =>
-  Boolean(
-    auth &&
-      /^parent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
-      auth.sign_in_provider === 'password'
-  );
-const isEmailPasswordParentAuth = (auth: AuthContext) =>
-  Boolean(
-    auth &&
-      auth.email.length >= 3 &&
-      !/^.+@gmaths\.local$/.test(auth.email.toLowerCase()) &&
-      auth.sign_in_provider === 'password'
-  );
-const isTrustedAgentIdentity = (auth: AuthContext) =>
-  isVerified(auth) || isPhoneAgentAuth(auth);
 const isAuthorizedAppUser = (auth: AuthContext) =>
-  isVerified(auth) || isPhoneAgentAuth(auth) || isPhoneParentAuth(auth) || isEmailPasswordParentAuth(auth);
+  isVerified(auth) || isPhoneAgentAuth(auth);
 const isBootstrappedAdmin = (auth: AuthContext) =>
   isVerified(auth) && auth!.email.toLowerCase() === BOOTSTRAPPED_ADMIN;
 const isValidId = (id: unknown) =>
@@ -344,25 +291,12 @@ function hasAllowedKeys(
 }
 
 function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
-  if (!isTrustedAgentIdentity(auth)) return false;
-  const email = auth!.email.toLowerCase();
-  return (
-    data.ownerUid === auth!.uid ||
-    (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    (typeof data.email === 'string' && data.email.length >= 3 && data.email === email)
-  );
-}
-
-function isParentRecordAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
   if (!isAuthorizedAppUser(auth)) return false;
   const email = auth!.email.toLowerCase();
   return (
     data.ownerUid === auth!.uid ||
     (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    (isTrustedAgentIdentity(auth) && typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
-    (isVerified(auth) && typeof data.email === 'string' && data.email.length >= 3 && data.email === email) ||
-    (isPhoneParentAuth(auth) && typeof data.phoneAuthEmail === 'string' && data.phoneAuthEmail.length >= 3 && data.phoneAuthEmail === email) ||
-    (isEmailPasswordParentAuth(auth) && data.passwordAuthEnabled === true && typeof data.email === 'string' && data.email.length >= 3 && data.email === email)
+    (typeof data.email === 'string' && data.email.length >= 3 && data.email === email)
   );
 }
 
@@ -372,10 +306,8 @@ function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknow
   return (
     data.ownerUid === auth!.uid ||
     (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    (isTrustedAgentIdentity(auth) && typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
-    (isVerified(auth) && typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email) ||
-    (isPhoneParentAuth(auth) && typeof data.parentPhoneEmail === 'string' && data.parentPhoneEmail.length >= 3 && data.parentPhoneEmail === email) ||
-    (isEmailPasswordParentAuth(auth) && data.passwordAuthEnabled === true && typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email)
+    (typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
+    (typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email)
   );
 }
 
@@ -394,7 +326,7 @@ function evaluateRule(
 
   if (col === 'agents') {
     if (op === 'get') {
-      if (!isTrustedAgentIdentity(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
       return isAgentAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
     }
@@ -409,7 +341,7 @@ function evaluateRule(
         'city', 'upiId', 'approvalStatus', 'commissionPerConversion',
       ];
       const validBase =
-        isTrustedAgentIdentity(auth) &&
+        isAuthorizedAppUser(auth) &&
         isValidId(docId) &&
         hasAllowedKeys(incoming, req, allowed) &&
         incoming.id === docId &&
@@ -435,39 +367,37 @@ function evaluateRule(
     if (op === 'get') {
       if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
-      return isParentRecordAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
+      const email = auth!.email.toLowerCase();
+      const ok =
+        existing.ownerUid === auth!.uid ||
+        (isBootstrappedAdmin(auth) && existing.workspaceId === 'gmaths_main') ||
+        existing.agentEmail === email ||
+        existing.email === email;
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
     if (op === 'create' && incoming) {
       const agentId = String(incoming.createdByAgentId ?? '');
-      const ok = isTrustedAgentIdentity(auth) && isValidId(docId) && Boolean(dbState.agents[agentId]);
+      const ok = isAuthorizedAppUser(auth) && isValidId(docId) && Boolean(dbState.agents[agentId]);
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
 
-  if (col === 'children') {
-    if (op === 'get') {
-      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
-      if (!existing) return 'ALLOW';
-      return isFamilyScopedAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
-    }
-    if (op === 'create' && incoming) {
-      const req = [
-        'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
-        'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
-        'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt',
-      ];
-      const allowed = [...req, 'parentPhoneEmail', 'passwordAuthEnabled'];
-      const parentId = String(incoming.parentId ?? '');
-      const ok =
-        isAuthorizedAppUser(auth) &&
-        isValidId(docId) &&
-        hasAllowedKeys(incoming, req, allowed) &&
-        INDIAN_CLASSES.has(String(incoming.grade)) &&
-        Boolean(dbState.parents[parentId]) &&
-        incoming.createdAt === SERVER_TIME &&
-        incoming.updatedAt === SERVER_TIME;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
-    }
+  if (col === 'children' && op === 'create' && incoming) {
+    const req = [
+      'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
+      'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
+      'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt',
+    ];
+    const parentId = String(incoming.parentId ?? '');
+    const ok =
+      isVerified(auth) &&
+      isValidId(docId) &&
+      hasAllowedKeys(incoming, req, req) &&
+      INDIAN_CLASSES.has(String(incoming.grade)) &&
+      Boolean(dbState.parents[parentId]) &&
+      incoming.createdAt === SERVER_TIME &&
+      incoming.updatedAt === SERVER_TIME;
+    return ok ? 'ALLOW' : 'PERMISSION_DENIED';
   }
 
   if (col === 'childLeaderboard') {
@@ -482,7 +412,7 @@ function evaluateRule(
       const allowed = [...req, 'isHidden'];
       const childDoc = dbState.children[docId];
       const ok =
-        isAuthorizedAppUser(auth) &&
+        isVerified(auth) &&
         isValidId(docId) &&
         hasAllowedKeys(incoming, req, allowed) &&
         (!('isHidden' in incoming) || incoming.isHidden === false) &&
@@ -495,18 +425,6 @@ function evaluateRule(
         isFamilyScopedAuthorized(auth, childDoc) &&
         incoming.createdAt === SERVER_TIME &&
         incoming.updatedAt === SERVER_TIME;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
-    }
-    if (op === 'update' && incoming && existing) {
-      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
-      const diffKeys = Object.keys(incoming).filter((k) => incoming[k] !== existing[k]);
-      if (isBootstrappedAdmin(auth)) {
-        const ok = diffKeys.every((k) => ['name', 'grade', 'isHidden', 'updatedAt'].includes(k));
-        return ok ? 'ALLOW' : 'PERMISSION_DENIED';
-      }
-      const childDoc = dbState.children[docId];
-      if (!childDoc || !isFamilyScopedAuthorized(auth, childDoc)) return 'PERMISSION_DENIED';
-      const ok = diffKeys.every((k) => ['name', 'grade', 'totalScore', 'sessionsCount', 'bestStreak', 'ownerUid', 'updatedAt'].includes(k));
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
@@ -579,7 +497,7 @@ function evaluateRule(
 
   if (col === 'payoutRequests') {
     if (op === 'get') {
-      if (!isTrustedAgentIdentity(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
       const email = auth!.email.toLowerCase();
       const ok =
@@ -589,7 +507,7 @@ function evaluateRule(
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
     }
     if (op === 'create' && incoming) {
-      if (!isTrustedAgentIdentity(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       const agentDoc = dbState.agents[String(incoming.agentId ?? '')];
       if (!agentDoc) return 'PERMISSION_DENIED';
       const ok =
@@ -625,20 +543,8 @@ function evaluateRule(
     }
   }
 
-  if (col === 'practiceSessions') {
-    if (op === 'create' && incoming) {
-      const ok =
-        isAuthorizedAppUser(auth) &&
-        isValidId(docId) &&
-        isFamilyScopedAuthorized(auth, incoming) &&
-        Boolean(dbState.children[String(incoming.childId ?? '')]) &&
-        Boolean(dbState.parents[String(incoming.parentId ?? '')]) &&
-        incoming.createdAt === SERVER_TIME;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
-    }
-    if (op === 'update') {
-      return 'PERMISSION_DENIED';
-    }
+  if (col === 'practiceSessions' && op === 'update') {
+    return 'PERMISSION_DENIED';
   }
 
   return 'PERMISSION_DENIED';
@@ -842,12 +748,19 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
     name: 'VALID-02 Parent Updates ChildLeaderboard Entry Without PII',
     expected: 'ALLOW',
     run: () =>
-      evaluateRule({ uid: 'parent_mobile_uid', email: 'parent1@example.com', email_verified: true }, 'childLeaderboard', 'update', 'ch_1', {
-        ...dbState.childLeaderboard.ch_1,
-        totalScore: 60,
-        sessionsCount: 4,
-        bestStreak: 15,
-        updatedAt: SERVER_TIME + 1,
+      evaluateRule({ uid: 'parent_mobile_uid', email: 'parent1@example.com', email_verified: true }, 'childLeaderboard', 'create', 'ch_1', {
+        id: 'ch_1',
+        childId: 'ch_1',
+        workspaceId: 'gmaths_main',
+        ownerUid: 'parent_mobile_uid',
+        name: 'Aarav',
+        grade: '3rd',
+        totalScore: 42,
+        sessionsCount: 3,
+        bestStreak: 11,
+        isPublic: true,
+        createdAt: SERVER_TIME,
+        updatedAt: SERVER_TIME,
       }),
   },
   {
@@ -989,86 +902,6 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
           isActive: false,
           commissionRate: 0,
           commissionPerConversion: 0,
-        }
-      ),
-  },
-  {
-    name: 'DD-23 Unverified Email+Password Parent Spoof on Google-Only Parent Blocked',
-    expected: 'PERMISSION_DENIED',
-    run: () =>
-      evaluateRule(
-        { uid: 'spoof_parent_uid', email: 'googleparent@example.com', email_verified: false, sign_in_provider: 'password' },
-        'parents',
-        'get',
-        'par_google_only'
-      ),
-  },
-  {
-    name: 'DD-24 Phone+Password Parent Cannot Read or Create Agent / Payout Records',
-    expected: 'PERMISSION_DENIED',
-    run: () => {
-      const auth = {
-        uid: 'par_phone_uid',
-        email: 'parent.9811223344@gmaths.local',
-        email_verified: false,
-        sign_in_provider: 'password' as const,
-      };
-      const agentRead = evaluateRule(auth, 'agents', 'get', 'ag_1');
-      const payoutRead = evaluateRule(auth, 'payoutRequests', 'get', 'pay_1');
-      return agentRead === 'PERMISSION_DENIED' && payoutRead === 'PERMISSION_DENIED' ? 'PERMISSION_DENIED' : 'ALLOW';
-    },
-  },
-  {
-    name: 'VALID-10 Mobile+Password Parent Reads Own Profile & Linked Child',
-    expected: 'ALLOW',
-    run: () => {
-      const auth = {
-        uid: 'par_phone_uid',
-        email: 'parent.9811223344@gmaths.local',
-        email_verified: false,
-        sign_in_provider: 'password' as const,
-      };
-      const parRes = evaluateRule(auth, 'parents', 'get', 'par_1');
-      const childRes = evaluateRule(auth, 'children', 'get', 'ch_1');
-      return parRes === 'ALLOW' && childRes === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
-    },
-  },
-  {
-    name: 'VALID-11 Email+Password Parent With passwordAuthEnabled Reads Profile & Logs Practice',
-    expected: 'ALLOW',
-    run: () => {
-      const auth = {
-        uid: 'par_email_pw_uid',
-        email: 'parent1@example.com',
-        email_verified: false,
-        sign_in_provider: 'password' as const,
-      };
-      const parRes = evaluateRule(auth, 'parents', 'get', 'par_1');
-      const practiceRes = evaluateRule(auth, 'practiceSessions', 'create', 'ps_new', {
-        ...dbState.practiceSessions.ps_1,
-        id: 'ps_new',
-        ownerUid: 'par_email_pw_uid',
-        parentPhoneEmail: 'parent.9811223344@gmaths.local',
-        passwordAuthEnabled: true,
-        createdAt: SERVER_TIME,
-      });
-      return parRes === 'ALLOW' && practiceRes === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
-    },
-  },
-  {
-    name: 'VALID-12 Admin Edits Child Name & Grade on ChildLeaderboard',
-    expected: 'ALLOW',
-    run: () =>
-      evaluateRule(
-        { uid: 'admin_uid', email: BOOTSTRAPPED_ADMIN, email_verified: true },
-        'childLeaderboard',
-        'update',
-        'ch_1',
-        {
-          ...dbState.childLeaderboard.ch_1,
-          name: 'Aarav Sharma',
-          grade: '4th',
-          updatedAt: SERVER_TIME + 1,
         }
       ),
   },

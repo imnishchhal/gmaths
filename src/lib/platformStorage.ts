@@ -52,7 +52,6 @@ import {
 import {
   hashContactForAttribution,
   isPhoneAgentAuthEmail,
-  isPhoneParentAuthEmail,
   normalizeEmailForMatch,
   normalizePhoneForMatch,
 } from '../utils/referral';
@@ -132,14 +131,6 @@ function mapParentDoc(id: string, x: DocumentData, fallbackUid: string): ParentP
     name: String(x.name ?? ''),
     contact: String(x.contact ?? ''),
     email: sanitizeEmail(String(x.email ?? '')),
-    phoneAuthEmail:
-      typeof x.phoneAuthEmail === 'string'
-        ? sanitizeEmail(x.phoneAuthEmail)
-        : undefined,
-    passwordAuthEnabled:
-      typeof x.passwordAuthEnabled === 'boolean'
-        ? x.passwordAuthEnabled
-        : undefined,
     passcodeHash: String(x.passcodeHash ?? ''),
     createdByAgentId: String(x.createdByAgentId ?? ''),
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
@@ -160,14 +151,6 @@ function mapChildDoc(id: string, x: DocumentData, fallbackUid: string): ChildPro
     parentId: String(x.parentId ?? ''),
     createdByAgentId: String(x.createdByAgentId ?? ''),
     parentEmail: sanitizeEmail(String(x.parentEmail ?? '')),
-    parentPhoneEmail:
-      typeof x.parentPhoneEmail === 'string'
-        ? sanitizeEmail(x.parentPhoneEmail)
-        : undefined,
-    passwordAuthEnabled:
-      typeof x.passwordAuthEnabled === 'boolean'
-        ? x.passwordAuthEnabled
-        : undefined,
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     name: String(x.name ?? ''),
     grade: normalizeIndianClass(String(x.grade ?? '3rd')),
@@ -186,14 +169,6 @@ function mapSubDoc(id: string, x: DocumentData, fallbackUid: string): Subscripti
     ownerUid: String(x.ownerUid ?? fallbackUid),
     parentId: String(x.parentId ?? ''),
     parentEmail: sanitizeEmail(String(x.parentEmail ?? '')),
-    parentPhoneEmail:
-      typeof x.parentPhoneEmail === 'string'
-        ? sanitizeEmail(x.parentPhoneEmail)
-        : undefined,
-    passwordAuthEnabled:
-      typeof x.passwordAuthEnabled === 'boolean'
-        ? x.passwordAuthEnabled
-        : undefined,
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     planType: 'yearly',
     startDate: String(x.startDate ?? ''),
@@ -216,14 +191,6 @@ function mapPracticeDoc(id: string, x: DocumentData, fallbackUid: string): Pract
     childId: String(x.childId ?? ''),
     parentId: String(x.parentId ?? ''),
     parentEmail: sanitizeEmail(String(x.parentEmail ?? '')),
-    parentPhoneEmail:
-      typeof x.parentPhoneEmail === 'string'
-        ? sanitizeEmail(x.parentPhoneEmail)
-        : undefined,
-    passwordAuthEnabled:
-      typeof x.passwordAuthEnabled === 'boolean'
-        ? x.passwordAuthEnabled
-        : undefined,
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     grade: normalizeIndianClass(String(x.grade ?? '3rd')),
     mode: (x.mode as ArithmeticMode) ?? 'mixed',
@@ -441,19 +408,10 @@ export interface ResolvedFirestoreRole {
   inactiveAgent?: boolean;
 }
 
-function isTrustedAgentEmail(user: User, emailLower: string): boolean {
+function isTrustedEmailIdentity(user: User, emailLower: string): boolean {
   return Boolean(
     emailLower.length >= 3 &&
       (user.emailVerified || isPhoneAgentAuthEmail(emailLower))
-  );
-}
-
-function isEmailPasswordParent(user: User, emailLower: string): boolean {
-  return Boolean(
-    emailLower.length >= 3 &&
-      !user.emailVerified &&
-      !isPhoneAgentAuthEmail(emailLower) &&
-      !isPhoneParentAuthEmail(emailLower)
   );
 }
 
@@ -496,68 +454,46 @@ export async function resolveUserRoleFromFirestore(
     }
   }
 
-  if (emailLower.length < 3) {
+  if (!isTrustedEmailIdentity(user, emailLower)) {
     return { session: null, route: '/' };
   }
 
-  const phoneParent = isPhoneParentAuthEmail(emailLower);
-  const trustedAgent = isTrustedAgentEmail(user, emailLower);
-
   // 3. Field / Sales Agent matched by verified Google email or phone-auth identity
-  if (trustedAgent) {
-    try {
-      const agentSnap = await getDocs(
-        query(collection(firestore, 'agents'), where('email', '==', emailLower), limit(5))
+  try {
+    const agentSnap = await getDocs(
+      query(collection(firestore, 'agents'), where('email', '==', emailLower), limit(5))
+    );
+    if (!agentSnap.empty) {
+      const matchedAgents = agentSnap.docs.map((d) =>
+        mapAgentDoc(d.id, d.data(), user.uid)
       );
-      if (!agentSnap.empty) {
-        const matchedAgents = agentSnap.docs.map((d) =>
-          mapAgentDoc(d.id, d.data(), user.uid)
-        );
-        const preferredAgent =
-          matchedAgents.find((a) => getAgentApprovalStatus(a) === 'approved') ??
-          matchedAgents.find((a) => getAgentApprovalStatus(a) === 'pending') ??
-          matchedAgents[0];
+      const preferredAgent =
+        matchedAgents.find((a) => getAgentApprovalStatus(a) === 'approved') ??
+        matchedAgents.find((a) => getAgentApprovalStatus(a) === 'pending') ??
+        matchedAgents[0];
 
-        const status = getAgentApprovalStatus(preferredAgent);
-        if (status === 'suspended') {
-          return { session: null, route: '/', inactiveAgent: true };
-        }
-        return {
-          session: {
-            role: 'agent',
-            accountId: preferredAgent.id,
-            displayName: preferredAgent.name,
-          },
-          route: '/agent',
-        };
+      const status = getAgentApprovalStatus(preferredAgent);
+      if (status === 'suspended') {
+        return { session: null, route: '/', inactiveAgent: true };
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'agents');
+      return {
+        session: {
+          role: 'agent',
+          accountId: preferredAgent.id,
+          displayName: preferredAgent.name,
+        },
+        route: '/agent',
+      };
     }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'agents');
   }
 
-  // 4. Parent matched by verified Google email, mobile auth email, or provisioned email+password
+  // 4. Parent matched by verified Google email
   try {
-    const parentQuery = phoneParent
-      ? query(
-          collection(firestore, 'parents'),
-          where('phoneAuthEmail', '==', emailLower),
-          limit(5)
-        )
-      : user.emailVerified
-      ? query(
-          collection(firestore, 'parents'),
-          where('email', '==', emailLower),
-          limit(5)
-        )
-      : query(
-          collection(firestore, 'parents'),
-          where('email', '==', emailLower),
-          where('passwordAuthEnabled', '==', true),
-          limit(5)
-        );
-
-    const parentSnap = await getDocs(parentQuery);
+    const parentSnap = await getDocs(
+      query(collection(firestore, 'parents'), where('email', '==', emailLower), limit(5))
+    );
     if (!parentSnap.empty) {
       const parentDoc = parentSnap.docs[0];
       const parent = mapParentDoc(parentDoc.id, parentDoc.data(), user.uid);
@@ -606,9 +542,7 @@ export function subscribePlatformWorkspace(
   const emailLower = sanitizeEmail(user.email ?? '');
   const isBootstrappedAdmin =
     Boolean(user.emailVerified) && emailLower === BOOTSTRAPPED_ADMIN_EMAIL;
-  const trustedAgent = isTrustedAgentEmail(user, emailLower);
-  const phoneParent = isPhoneParentAuthEmail(emailLower);
-  const emailPasswordParent = isEmailPasswordParent(user, emailLower);
+  const trustedIdentity = isTrustedEmailIdentity(user, emailLower);
 
   let settledCollections = 0;
   const markCollectionSettled = () => {
@@ -631,8 +565,7 @@ export function subscribePlatformWorkspace(
             ),
           },
         ]
-      : trustedAgent
-      ? [
+      : [
           {
             key: 'owner',
             path: 'agents',
@@ -642,17 +575,20 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          {
-            key: 'email',
-            path: 'agents',
-            q: query(
-              collection(firestore, 'agents'),
-              where('email', '==', emailLower),
-              limit(50)
-            ),
-          },
-        ]
-      : [];
+          ...(trustedIdentity
+            ? [
+                {
+                  key: 'email',
+                  path: 'agents',
+                  q: query(
+                    collection(firestore, 'agents'),
+                    where('email', '==', emailLower),
+                    limit(50)
+                  ),
+                },
+              ]
+            : []),
+        ];
 
   const parentQueries: Array<{ key: string; q: Query<DocumentData>; path: string }> =
     isBootstrappedAdmin
@@ -677,7 +613,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(trustedAgent
+          ...(trustedIdentity
             ? [
                 {
                   key: 'agentEmail',
@@ -688,43 +624,12 @@ export function subscribePlatformWorkspace(
                     limit(250)
                   ),
                 },
-              ]
-            : []),
-          ...(user.emailVerified
-            ? [
                 {
                   key: 'parentEmail',
                   path: 'parents',
                   q: query(
                     collection(firestore, 'parents'),
                     where('email', '==', emailLower),
-                    limit(25)
-                  ),
-                },
-              ]
-            : []),
-          ...(phoneParent
-            ? [
-                {
-                  key: 'parentPhoneEmail',
-                  path: 'parents',
-                  q: query(
-                    collection(firestore, 'parents'),
-                    where('phoneAuthEmail', '==', emailLower),
-                    limit(25)
-                  ),
-                },
-              ]
-            : []),
-          ...(emailPasswordParent
-            ? [
-                {
-                  key: 'parentPwdEmail',
-                  path: 'parents',
-                  q: query(
-                    collection(firestore, 'parents'),
-                    where('email', '==', emailLower),
-                    where('passwordAuthEnabled', '==', true),
                     limit(25)
                   ),
                 },
@@ -757,7 +662,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(trustedAgent
+          ...(trustedIdentity
             ? [
                 {
                   key: 'agentEmail',
@@ -768,43 +673,12 @@ export function subscribePlatformWorkspace(
                     limit(250)
                   ),
                 },
-              ]
-            : []),
-          ...(user.emailVerified
-            ? [
                 {
                   key: 'parentEmail',
                   path: colName,
                   q: query(
                     collection(firestore, colName),
                     where('parentEmail', '==', emailLower),
-                    limit(250)
-                  ),
-                },
-              ]
-            : []),
-          ...(phoneParent
-            ? [
-                {
-                  key: 'parentPhoneEmail',
-                  path: colName,
-                  q: query(
-                    collection(firestore, colName),
-                    where('parentPhoneEmail', '==', emailLower),
-                    limit(250)
-                  ),
-                },
-              ]
-            : []),
-          ...(emailPasswordParent
-            ? [
-                {
-                  key: 'parentPwdEmail',
-                  path: colName,
-                  q: query(
-                    collection(firestore, colName),
-                    where('parentEmail', '==', emailLower),
-                    where('passwordAuthEnabled', '==', true),
                     limit(250)
                   ),
                 },
@@ -835,7 +709,7 @@ export function subscribePlatformWorkspace(
               limit(250)
             ),
           },
-          ...(trustedAgent
+          ...(trustedIdentity
             ? [
                 {
                   key: 'agentEmail',
@@ -873,7 +747,7 @@ export function subscribePlatformWorkspace(
               limit(100)
             ),
           },
-          ...(user.emailVerified
+          ...(trustedIdentity
             ? [
                 {
                   key: 'subEmail',
@@ -884,10 +758,6 @@ export function subscribePlatformWorkspace(
                     limit(100)
                   ),
                 },
-              ]
-            : []),
-          ...(trustedAgent
-            ? [
                 {
                   key: 'agentEmail',
                   path: 'studentSubscriptions',
@@ -914,7 +784,7 @@ export function subscribePlatformWorkspace(
             ),
           },
         ]
-      : trustedAgent
+      : trustedIdentity
       ? [
           {
             key: 'agentEmail',
@@ -1268,8 +1138,6 @@ export async function cloudCreateParent(
       name: (parent.name.trim() || 'Parent').slice(0, 80),
       contact: (parent.contact.trim() || '000').slice(0, 120),
       email: sanitizeEmail(parent.email),
-      phoneAuthEmail: sanitizeEmail(parent.phoneAuthEmail ?? ''),
-      passwordAuthEnabled: Boolean(parent.passwordAuthEnabled),
       passcodeHash: sanitizeHash(parent.passcodeHash),
       createdByAgentId: sanitizeId(parent.createdByAgentId, 'ag'),
       agentEmail: sanitizeEmail(parent.agentEmail),
@@ -1283,86 +1151,6 @@ export async function cloudCreateParent(
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
-}
-
-export async function cloudUpdateParentPasswordHash(
-  parentId: string,
-  passcodeHash: string
-): Promise<void> {
-  if (!db) throw new Error('Cloud Firestore is not initialized.');
-  const firestore = db;
-  const id = sanitizeId(parentId, 'par');
-  const path = `parents/${id}`;
-  try {
-    await updateDoc(doc(firestore, 'parents', id), {
-      passcodeHash: sanitizeHash(passcodeHash),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-  }
-}
-
-export async function cloudUpdateParentByAdmin(params: {
-  parentId: string;
-  name: string;
-  contact: string;
-  email: string;
-  phoneAuthEmail: string;
-  passwordAuthEnabled: boolean;
-  passcodeHash: string;
-  linkedChildIds: string[];
-  linkedSubIds: string[];
-}): Promise<void> {
-  if (!db) throw new Error('Cloud Firestore is not initialized.');
-  const firestore = db;
-  const id = sanitizeId(params.parentId, 'par');
-  const parentEmail = sanitizeEmail(params.email);
-  const parentPhoneEmail = sanitizeEmail(params.phoneAuthEmail);
-  const passwordAuthEnabled = Boolean(params.passwordAuthEnabled);
-
-  try {
-    await updateDoc(doc(firestore, 'parents', id), {
-      name: (params.name.trim() || 'Parent').slice(0, 80),
-      contact: (params.contact.trim() || '000').slice(0, 120),
-      email: parentEmail,
-      phoneAuthEmail: parentPhoneEmail,
-      passwordAuthEnabled,
-      passcodeHash: sanitizeHash(params.passcodeHash),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `parents/${id}`);
-  }
-
-  await Promise.all([
-    ...params.linkedChildIds.map(async (rawChildId) => {
-      const chId = sanitizeId(rawChildId, 'ch');
-      try {
-        await updateDoc(doc(firestore, 'children', chId), {
-          parentEmail,
-          parentPhoneEmail,
-          passwordAuthEnabled,
-          updatedAt: serverTimestamp(),
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `children/${chId}`);
-      }
-    }),
-    ...params.linkedSubIds.map(async (rawSubId) => {
-      const subId = sanitizeId(rawSubId, 'sub');
-      try {
-        await updateDoc(doc(firestore, 'subscriptions', subId), {
-          parentEmail,
-          parentPhoneEmail,
-          passwordAuthEnabled,
-          updatedAt: serverTimestamp(),
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `subscriptions/${subId}`);
-      }
-    }),
-  ]);
 }
 
 export async function cloudCreateChild(
@@ -1381,8 +1169,6 @@ export async function cloudCreateChild(
       parentId: sanitizeId(child.parentId, 'par'),
       createdByAgentId: sanitizeId(child.createdByAgentId, 'ag'),
       parentEmail: sanitizeEmail(child.parentEmail),
-      parentPhoneEmail: sanitizeEmail(child.parentPhoneEmail ?? ''),
-      passwordAuthEnabled: Boolean(child.passwordAuthEnabled),
       agentEmail: sanitizeEmail(child.agentEmail),
       name: (child.name.trim() || 'Student').slice(0, 60),
       grade: normalizeIndianClass(child.grade),
@@ -1394,42 +1180,6 @@ export async function cloudCreateChild(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
-  }
-}
-
-export async function cloudUpdateChildByAdmin(
-  childId: string,
-  name: string,
-  grade: string
-): Promise<void> {
-  if (!db) throw new Error('Cloud Firestore is not initialized.');
-  const firestore = db;
-  const id = sanitizeId(childId, 'ch');
-  const cleanName = (name.trim() || 'Student').slice(0, 60);
-  const safeGrade = normalizeIndianClass(grade);
-
-  try {
-    await updateDoc(doc(firestore, 'children', id), {
-      name: cleanName,
-      grade: safeGrade,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `children/${id}`);
-  }
-
-  const lbRef = doc(firestore, 'childLeaderboard', id);
-  try {
-    const snap = await getDoc(lbRef);
-    if (snap.exists()) {
-      await updateDoc(lbRef, {
-        name: cleanName,
-        grade: safeGrade,
-        updatedAt: serverTimestamp(),
-      });
-    }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `childLeaderboard/${id}`);
   }
 }
 
@@ -1448,8 +1198,6 @@ export async function cloudCreateSubscription(
       ownerUid: sanitizeId(user.uid, 'u'),
       parentId: sanitizeId(sub.parentId, 'par'),
       parentEmail: sanitizeEmail(sub.parentEmail),
-      parentPhoneEmail: sanitizeEmail(sub.parentPhoneEmail ?? ''),
-      passwordAuthEnabled: Boolean(sub.passwordAuthEnabled),
       agentEmail: sanitizeEmail(sub.agentEmail),
       planType: 'yearly',
       startDate: sanitizeDate(sub.startDate),
@@ -1538,8 +1286,6 @@ export async function cloudCreatePracticeSession(
       childId: sanitizeId(session.childId, 'ch'),
       parentId: sanitizeId(session.parentId, 'par'),
       parentEmail: sanitizeEmail(session.parentEmail),
-      parentPhoneEmail: sanitizeEmail(session.parentPhoneEmail ?? ''),
-      passwordAuthEnabled: Boolean(session.passwordAuthEnabled),
       agentEmail: sanitizeEmail(session.agentEmail),
       grade: normalizeIndianClass(session.grade),
       mode,

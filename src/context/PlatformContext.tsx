@@ -7,10 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { formatPhoneAuthError, useFirebase } from './FirebaseContext';
-import {
-  provisionAgentAuthAccount,
-  provisionSecondaryAuthAccount,
-} from '../lib/firebase';
+import { provisionAgentAuthAccount } from '../lib/firebase';
 import {
   cloudCreateAgent,
   cloudCreateChild,
@@ -27,12 +24,9 @@ import {
   cloudUpdateAgent,
   cloudUpdateAgentPasswordHash,
   cloudUpdateAgentSelfProfile,
-  cloudUpdateChildByAdmin,
   cloudUpdateChildLeaderboardVisibility,
   cloudUpdateChildScoreAndLeaderboard,
   cloudUpdateLeadStatus,
-  cloudUpdateParentByAdmin,
-  cloudUpdateParentPasswordHash,
   cloudUpdateSubscription,
   lookupReferralCodeCloud,
   resolveUserRoleFromFirestore,
@@ -89,17 +83,14 @@ import {
   ConcreteOperation,
   CustomPreset,
   DrillConfig,
-  IndianClass,
   SessionRecord,
   normalizeIndianClass,
 } from '../types/math';
 import { hashSecret, verifySecret } from '../utils/crypto';
 import {
   buildAgentAuthEmail,
-  buildParentAuthEmail,
   captureReferralFromCurrentUrl,
   hashContactForAttribution,
-  isLocalSyntheticAuthEmail,
   isPhoneAgentAuthEmail,
   loadStickyReferral,
   normalizeEmailForMatch,
@@ -248,7 +239,7 @@ interface PlatformContextValue {
     phone?: string
   ) => Promise<void>;
 
-  // Role Authentication (Phone+Password for Agents, Mobile/Email+Password or Google for Parents, Google for Admin)
+  // Role Authentication (Phone+Password for Agents, Google for Admin/Parent)
   signInAndRouteWithGoogle: () => Promise<{ ok: boolean; error?: string }>;
   signInWithGoogleRedirectFlow: () => Promise<void>;
   loginAgentPhonePassword: (
@@ -259,17 +250,9 @@ interface PlatformContextValue {
     identifier: string,
     passcode: string
   ) => Promise<{ ok: boolean; error?: string }>;
-  loginParentCredentials: (
-    identifier: string,
-    password: string
-  ) => Promise<{ ok: boolean; error?: string }>;
   loginParentPasscode: (
     contact: string,
     passcode: string
-  ) => Promise<{ ok: boolean; error?: string }>;
-  changeParentPassword: (
-    parentId: string,
-    newPassword: string
   ) => Promise<{ ok: boolean; error?: string }>;
   registerSalesAgent: (input: {
     name: string;
@@ -342,26 +325,6 @@ interface PlatformContextValue {
   adminOverrideSubscription: (
     parentId: string,
     action: 'activate' | 'extend_year' | 'suspend'
-  ) => Promise<{ ok: boolean; error?: string }>;
-  adminUpdateParent: (
-    parentId: string,
-    updates: {
-      name: string;
-      contact: string;
-      email: string;
-      newPassword?: string;
-    }
-  ) => Promise<{ ok: boolean; error?: string; warning?: string }>;
-  adminUpdateChild: (
-    childId: string,
-    updates: {
-      name: string;
-      grade: IndianClass;
-    }
-  ) => Promise<{ ok: boolean; error?: string }>;
-  adminAddChildToParent: (
-    parentId: string,
-    child: ChildOnboardingInput
   ) => Promise<{ ok: boolean; error?: string }>;
   markPayoutPaid: (
     payoutId: string,
@@ -442,8 +405,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     signInWithGoogle,
     signInWithGoogleRedirect,
     signInWithPhoneCredentials,
-    signInWithEmailPassword,
-    signInWithParentPhoneCredentials,
     signUpWithPhoneCredentials,
     changeCurrentPassword,
     signOutUser,
@@ -530,9 +491,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const localState = loadLocalGrowthState();
       setAppConfig(localState.appConfig);
       setAgents(localState.agents);
-      setParents(localState.parents ?? []);
-      setChildren(localState.children ?? []);
-      setSubscriptions(localState.subscriptions ?? []);
       setLeads(localState.leads);
       setStudentSubscriptions(localState.studentSubscriptions);
       setPayoutRequests(localState.payoutRequests);
@@ -1273,7 +1231,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   const recordTrialLeadIfReferred = useCallback(
     async (name: string, email: string, phone = '') => {
       if (!capturedReferralCode || !user) return;
-      if (isLocalSyntheticAuthEmail(user.email)) return;
+      if (isPhoneAgentAuthEmail(user.email)) return;
       const emailLower = normalizeEmailForMatch(email || user.email || '');
       if (!emailLower) return;
 
@@ -1834,185 +1792,37 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     [agents, loginAgentPhonePassword, updateRoleSession, user]
   );
 
-  const loginParentCredentials = useCallback(
-    async (identifier: string, password: string) => {
-      const idTrim = identifier.trim();
-      const idLower = idTrim.toLowerCase();
-      const phoneDigits = normalizePhoneDigits(idTrim);
-      const isEmail = idLower.includes('@');
-
-      if (!idTrim || !password.trim()) {
-        return {
-          ok: false,
-          error: 'Enter your registered mobile number or email and password.',
-        };
-      }
-      if (!isEmail && phoneDigits.length < 7) {
-        return {
-          ok: false,
-          error: 'Enter a valid mobile number (at least 7 digits) or email address.',
-        };
-      }
-
-      if (!isConfigured) {
-        const match = parents.find((p) =>
-          isEmail
-            ? p.email.trim().toLowerCase() === idLower
-            : (phoneDigits.length >= 7 &&
-                normalizePhoneDigits(p.contact) === phoneDigits) ||
-              p.contact.trim().toLowerCase() === idLower
-        );
-        if (!match) {
-          return {
-            ok: false,
-            error: 'No Parent account found for this mobile number or email.',
-          };
-        }
-        const valid = await verifySecret(password, match.passcodeHash);
-        if (!valid) {
-          return {
-            ok: false,
-            error: 'Incorrect mobile/email or password.',
-          };
-        }
-        updateRoleSession({
-          role: 'parent',
-          accountId: match.id,
-          displayName: match.name,
-        });
-        return { ok: true };
-      }
-
-      const authOutcome = isEmail
-        ? await signInWithEmailPassword(idLower, password, 'Parent')
-        : await signInWithParentPhoneCredentials(phoneDigits, password);
-
-      if (authOutcome.user) {
-        const resolved = await resolveUserRoleFromFirestore(authOutcome.user);
-        if (resolved.session?.role === 'parent') {
-          updateRoleSession(resolved.session);
-          return { ok: true };
-        }
-        if (resolved.session) {
-          return {
-            ok: false,
-            error:
-              'These credentials belong to another portal. Please sign in on the matching portal.',
-          };
-        }
-        await signOutUser();
+  const loginParentPasscode = useCallback(
+    async (contact: string, passcode: string) => {
+      if (!user) {
         return {
           ok: false,
           error:
-            'Login verified, but your Parent family profile was not found. Ask your Agent or Admin to confirm your details.',
+            'Sign in with Google first to load your Cloud Firestore family account.',
         };
-      }
-
-      return {
-        ok: false,
-        error:
-          authOutcome.error || 'Incorrect mobile number/email or password.',
-      };
-    },
-    [
-      isConfigured,
-      parents,
-      signInWithEmailPassword,
-      signInWithParentPhoneCredentials,
-      signOutUser,
-      updateRoleSession,
-    ]
-  );
-
-  const changeParentPassword = useCallback(
-    async (parentId: string, newPassword: string) => {
-      const target = parents.find((p) => p.id === parentId);
-      if (!target) {
-        return { ok: false, error: 'Parent profile not found.' };
-      }
-      if (newPassword.length < 6) {
-        return {
-          ok: false,
-          error: 'New password must be at least 6 characters long.',
-        };
-      }
-
-      if (isConfigured) {
-        const hasPasswordProvider = Boolean(
-          user?.providerData?.some((p) => p.providerId === 'password')
-        );
-        if (!user || !hasPasswordProvider) {
-          return {
-            ok: false,
-            error:
-              'Sign in with your mobile number or email and password first to update your login password.',
-          };
-        }
-        const authRes = await changeCurrentPassword(newPassword);
-        if (!authRes.ok) {
-          return {
-            ok: false,
-            error: authRes.error || 'Could not update login password.',
-          };
-        }
-      }
-
-      const nextHash = await hashSecret(newPassword);
-      if (!isConfigured) {
-        const local = loadLocalGrowthState();
-        local.parents = (local.parents ?? []).map((p) =>
-          p.id === parentId
-            ? { ...p, passcodeHash: nextHash, updatedAtMs: Date.now() }
-            : p
-        );
-        saveLocalGrowthState(local);
-        setParents(local.parents);
-        return { ok: true };
-      }
-
-      try {
-        await cloudUpdateParentPasswordHash(parentId, nextHash);
-        return { ok: true };
-      } catch (err) {
-        return {
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-    },
-    [changeCurrentPassword, isConfigured, parents, user]
-  );
-
-  const loginParentPasscode = useCallback(
-    async (contact: string, passcode: string) => {
-      if (isConfigured && !user) {
-        return loginParentCredentials(contact, passcode);
       }
       const target = contact.trim().toLowerCase();
-      const targetDigits = normalizePhoneDigits(contact);
       if (!target || !passcode.trim()) {
         return {
           ok: false,
-          error: 'Enter your registered mobile or email and password.',
+          error: 'Enter your registered mobile or email and passcode.',
         };
       }
       const match = parents.find(
         (p) =>
           p.contact.trim().toLowerCase() === target ||
-          (targetDigits.length >= 7 &&
-            normalizePhoneDigits(p.contact) === targetDigits) ||
-          (p.email && p.email.trim().toLowerCase() === target)
+          p.email.trim().toLowerCase() === target
       );
       if (!match) {
         return {
           ok: false,
           error:
-            'Parent account not found in your synced workspace. Sign in with your mobile number, email, or linked Google account.',
+            'Parent account not found in your synced workspace. Sign in with the Google email linked by your Agent.',
         };
       }
       const valid = await verifySecret(passcode, match.passcodeHash);
       if (!valid) {
-        return { ok: false, error: 'Incorrect Parent password.' };
+        return { ok: false, error: 'Incorrect Parent passcode.' };
       }
       updateRoleSession({
         role: 'parent',
@@ -2021,7 +1831,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       return { ok: true };
     },
-    [isConfigured, loginParentCredentials, parents, updateRoleSession, user]
+    [parents, updateRoleSession, user]
   );
 
   const switchToChildMode = useCallback(
@@ -2375,229 +2185,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     [getLatestSubscriptionForParent, isConfigured, user]
   );
 
-  const adminUpdateParent = useCallback(
-    async (
-      parentId: string,
-      updates: {
-        name: string;
-        contact: string;
-        email: string;
-        newPassword?: string;
-      }
-    ) => {
-      if (isConfigured && !user) {
-        return { ok: false, error: 'Sign in with Google Admin first.' };
-      }
-      const existing = parents.find((p) => p.id === parentId);
-      if (!existing) {
-        return { ok: false, error: 'Parent record not found.' };
-      }
-
-      const nameClean = updates.name.trim();
-      const contactClean = updates.contact.trim();
-      const emailClean = updates.email.trim().toLowerCase();
-      const newPasswordClean = updates.newPassword?.trim() ?? '';
-      const phoneDigits = normalizePhoneDigits(contactClean);
-
-      if (!nameClean || contactClean.length < 3) {
-        return {
-          ok: false,
-          error: 'Parent Name and a valid Mobile Number are required.',
-        };
-      }
-      if (emailClean && !emailClean.includes('@')) {
-        return {
-          ok: false,
-          error: 'Enter a valid Parent email address or leave it blank.',
-        };
-      }
-      if (newPasswordClean && newPasswordClean.length < 6) {
-        return {
-          ok: false,
-          error: 'New password must be at least 6 characters long.',
-        };
-      }
-
-      const duplicate = parents.some(
-        (p) =>
-          p.id !== parentId &&
-          ((phoneDigits.length >= 7 &&
-            normalizePhoneDigits(p.contact) === phoneDigits) ||
-            p.contact.trim().toLowerCase() === contactClean.toLowerCase() ||
-            (emailClean && p.email && p.email.toLowerCase() === emailClean))
-      );
-      if (duplicate) {
-        return {
-          ok: false,
-          error: 'Another Parent account already uses this mobile number or email.',
-        };
-      }
-
-      const phoneAuthEmail =
-        phoneDigits.length >= 7 ? buildParentAuthEmail(phoneDigits) : '';
-      const passcodeHash = newPasswordClean
-        ? await hashSecret(newPasswordClean)
-        : existing.passcodeHash;
-
-      let passwordAuthEnabled = Boolean(
-        emailClean &&
-          emailClean === existing.email &&
-          existing.passwordAuthEnabled
-      );
-      let warning: string | undefined;
-
-      if (isConfigured && newPasswordClean) {
-        if (phoneAuthEmail) {
-          const phoneProv = await provisionSecondaryAuthAccount(
-            phoneAuthEmail,
-            newPasswordClean
-          );
-          if (!phoneProv.created) {
-            if (phoneProv.code === 'auth/email-already-in-use') {
-              warning =
-                'Parent details saved. Mobile login already exists in Firebase Auth — ask the parent to update their password inside Parent Portal if needed.';
-            } else if (phoneProv.code === 'auth/operation-not-allowed') {
-              return {
-                ok: false,
-                error:
-                  'Email/Password sign-in must be enabled in Firebase Console → Authentication → Sign-in method.',
-              };
-            }
-          }
-        }
-        if (emailClean) {
-          const emailProv = await provisionSecondaryAuthAccount(
-            emailClean,
-            newPasswordClean
-          );
-          if (emailProv.created) {
-            passwordAuthEnabled = true;
-          } else if (emailProv.code === 'auth/email-already-in-use') {
-            warning =
-              warning ??
-              'Parent details saved. This email already exists in Firebase Auth — parent can sign in with Google or their existing password.';
-          }
-        }
-      } else if (!isConfigured) {
-        passwordAuthEnabled = Boolean(emailClean);
-      }
-
-      const linkedChildren = children.filter((c) => c.parentId === parentId);
-      const linkedSubs = subscriptions.filter((s) => s.parentId === parentId);
-
-      if (!isConfigured) {
-        const now = Date.now();
-        const local = loadLocalGrowthState();
-        local.parents = (local.parents ?? []).map((p) =>
-          p.id === parentId
-            ? {
-                ...p,
-                name: nameClean,
-                contact: contactClean,
-                email: emailClean,
-                phoneAuthEmail,
-                passwordAuthEnabled,
-                passcodeHash,
-                updatedAtMs: now,
-              }
-            : p
-        );
-        local.children = (local.children ?? []).map((c) =>
-          c.parentId === parentId
-            ? {
-                ...c,
-                parentEmail: emailClean,
-                parentPhoneEmail: phoneAuthEmail,
-                passwordAuthEnabled,
-                updatedAtMs: now,
-              }
-            : c
-        );
-        local.subscriptions = (local.subscriptions ?? []).map((s) =>
-          s.parentId === parentId
-            ? {
-                ...s,
-                parentEmail: emailClean,
-                parentPhoneEmail: phoneAuthEmail,
-                passwordAuthEnabled,
-                updatedAtMs: now,
-              }
-            : s
-        );
-        saveLocalGrowthState(local);
-        setParents(local.parents);
-        setChildren(local.children);
-        setSubscriptions(local.subscriptions);
-        return { ok: true, warning };
-      }
-
-      try {
-        await cloudUpdateParentByAdmin({
-          parentId,
-          name: nameClean,
-          contact: contactClean,
-          email: emailClean,
-          phoneAuthEmail,
-          passwordAuthEnabled,
-          passcodeHash,
-          linkedChildIds: linkedChildren.map((c) => c.id),
-          linkedSubIds: linkedSubs.map((s) => s.id),
-        });
-        setPlatformError(null);
-        return { ok: true, warning };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setPlatformError(msg);
-        return { ok: false, error: msg };
-      }
-    },
-    [children, isConfigured, parents, subscriptions, user]
-  );
-
-  const adminUpdateChild = useCallback(
-    async (
-      childId: string,
-      updates: { name: string; grade: IndianClass }
-    ) => {
-      if (isConfigured && !user) {
-        return { ok: false, error: 'Sign in with Google Admin first.' };
-      }
-      const existing = children.find((c) => c.id === childId);
-      if (!existing) {
-        return { ok: false, error: 'Child profile not found.' };
-      }
-      const nameClean = updates.name.trim();
-      if (!nameClean) {
-        return { ok: false, error: 'Child Name is required.' };
-      }
-      const safeGrade = normalizeIndianClass(updates.grade);
-
-      if (!isConfigured) {
-        const now = Date.now();
-        const local = loadLocalGrowthState();
-        local.children = (local.children ?? []).map((c) =>
-          c.id === childId
-            ? { ...c, name: nameClean, grade: safeGrade, updatedAtMs: now }
-            : c
-        );
-        saveLocalGrowthState(local);
-        setChildren(local.children);
-        return { ok: true };
-      }
-
-      try {
-        await cloudUpdateChildByAdmin(childId, nameClean, safeGrade);
-        setPlatformError(null);
-        return { ok: true };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setPlatformError(msg);
-        return { ok: false, error: msg };
-      }
-    },
-    [children, isConfigured, user]
-  );
-
   const markPayoutPaid = useCallback(
     async (payoutId: string, utrNumber: string) => {
       const cleanUtr = utrNumber.trim();
@@ -2763,10 +2350,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       receiptNote: string;
       startDate: string;
     }) => {
-      if (isConfigured && !user) {
+      if (!user || !isConfigured) {
         return {
           ok: false,
-          error: 'Sign in first to save families to Cloud Firestore.',
+          error: 'Sign in with Google to save families to Cloud Firestore.',
         };
       }
       const agent = agents.find((a) => a.id === input.agentId);
@@ -2782,32 +2369,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const contactClean = input.parentContact.trim();
       const emailClean = input.parentEmail.trim().toLowerCase();
-      const passwordClean = input.parentPasscode.trim();
-      const phoneDigits = normalizePhoneDigits(contactClean);
-
-      if (!input.parentName.trim() || !contactClean || !passwordClean) {
+      if (!input.parentName.trim() || !contactClean || !input.parentPasscode.trim()) {
         return {
           ok: false,
-          error: 'Parent Name, Mobile Number, and Login Password are required.',
+          error: 'Parent Name, Mobile Number, and Passcode are required.',
         };
       }
-      if (phoneDigits.length < 7 && !emailClean.includes('@')) {
+      if (!emailClean || !emailClean.includes('@')) {
         return {
           ok: false,
           error:
-            'Enter a valid Mobile Number (at least 7 digits) or a valid Email address.',
-        };
-      }
-      if (emailClean && !emailClean.includes('@')) {
-        return {
-          ok: false,
-          error: 'Enter a valid Parent Email or leave the Email field blank.',
-        };
-      }
-      if (passwordClean.length < 6) {
-        return {
-          ok: false,
-          error: 'Parent Login Password must be at least 6 characters long.',
+            'Enter the Parent Google Email so they can sign in on any mobile or desktop device.',
         };
       }
       if (input.children.length === 0) {
@@ -2816,15 +2388,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const existingParent = parents.some(
         (p) =>
-          (phoneDigits.length >= 7 &&
-            normalizePhoneDigits(p.contact) === phoneDigits) ||
           p.contact.trim().toLowerCase() === contactClean.toLowerCase() ||
-          (emailClean && p.email && p.email.toLowerCase() === emailClean)
+          (p.email && p.email.toLowerCase() === emailClean)
       );
       if (existingParent) {
         return {
           ok: false,
-          error: 'A Parent account with this mobile number or email already exists.',
+          error: 'A Parent account with this mobile or email already exists.',
         };
       }
 
@@ -2837,83 +2407,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
-      const phoneAuthEmail =
-        phoneDigits.length >= 7 ? buildParentAuthEmail(phoneDigits) : '';
-      let passwordAuthEnabled = false;
-
-      if (isConfigured) {
-        if (phoneAuthEmail) {
-          const phoneProvision = await provisionSecondaryAuthAccount(
-            phoneAuthEmail,
-            passwordClean
-          );
-          if (!phoneProvision.created) {
-            if (phoneProvision.code === 'auth/operation-not-allowed') {
-              return {
-                ok: false,
-                error:
-                  'Email/Password sign-in must be enabled in Firebase Console → Authentication → Sign-in method to create Parent logins.',
-              };
-            }
-            if (phoneProvision.code === 'auth/email-already-in-use') {
-              return {
-                ok: false,
-                error:
-                  'A Parent login for this mobile number already exists in Firebase Authentication.',
-              };
-            }
-            return {
-              ok: false,
-              error:
-                phoneProvision.error ||
-                'Could not create Parent mobile login credentials.',
-            };
-          }
-        }
-
-        if (emailClean) {
-          const emailProvision = await provisionSecondaryAuthAccount(
-            emailClean,
-            passwordClean
-          );
-          if (emailProvision.created) {
-            passwordAuthEnabled = true;
-          } else if (emailProvision.code === 'auth/operation-not-allowed') {
-            return {
-              ok: false,
-              error:
-                'Email/Password sign-in must be enabled in Firebase Console → Authentication → Sign-in method.',
-            };
-          } else if (
-            emailProvision.code &&
-            emailProvision.code !== 'auth/email-already-in-use'
-          ) {
-            return {
-              ok: false,
-              error:
-                emailProvision.error ||
-                'Could not create Parent email login credentials.',
-            };
-          }
-        }
-      } else {
-        passwordAuthEnabled = Boolean(emailClean);
-      }
-
       const now = Date.now();
       const parentId = makeId('par');
-      const ownerUid = user?.uid || `local_${parentId}`;
-      const parentHash = await hashSecret(passwordClean);
+      const parentHash = await hashSecret(input.parentPasscode);
 
       const newParent: ParentProfile = {
         id: parentId,
         workspaceId: WORKSPACE_ID,
-        ownerUid,
+        ownerUid: user.uid,
         name: input.parentName.trim(),
         contact: contactClean,
         email: emailClean,
-        phoneAuthEmail,
-        passwordAuthEnabled,
         passcodeHash: parentHash,
         createdByAgentId: agent.id,
         agentEmail: agent.email,
@@ -2928,12 +2432,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const newChildren: ChildProfile[] = input.children.map((ch) => ({
         id: makeId('ch'),
         workspaceId: WORKSPACE_ID,
-        ownerUid,
+        ownerUid: user.uid,
         parentId,
         createdByAgentId: agent.id,
         parentEmail: emailClean,
-        parentPhoneEmail: phoneAuthEmail,
-        passwordAuthEnabled,
         agentEmail: agent.email,
         name: ch.name.trim(),
         grade: normalizeIndianClass(ch.grade),
@@ -2948,11 +2450,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const newSub: SubscriptionRecord = {
         id: makeId('sub'),
         workspaceId: WORKSPACE_ID,
-        ownerUid,
+        ownerUid: user.uid,
         parentId,
         parentEmail: emailClean,
-        parentPhoneEmail: phoneAuthEmail,
-        passwordAuthEnabled,
         agentEmail: agent.email,
         planType: 'yearly',
         startDate,
@@ -2965,22 +2465,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         createdAtMs: now,
         updatedAtMs: now,
       };
-
-      if (!isConfigured) {
-        const local = loadLocalGrowthState();
-        local.parents = [newParent, ...(local.parents ?? [])];
-        local.children = [...newChildren, ...(local.children ?? [])];
-        local.subscriptions = [newSub, ...(local.subscriptions ?? [])];
-        saveLocalGrowthState(local);
-        setParents(local.parents);
-        setChildren(local.children);
-        setSubscriptions(local.subscriptions);
-        return { ok: true, parent: newParent };
-      }
-
-      if (!user) {
-        return { ok: false, error: 'Sign in required.' };
-      }
 
       try {
         await cloudCreateParent(user, newParent);
@@ -3001,18 +2485,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addChildToParent = useCallback(
     async (parentId: string, agentId: string, ch: ChildOnboardingInput) => {
-      if (isConfigured && !user) {
+      if (!user || !isConfigured) {
         return {
           ok: false,
-          error: 'Sign in first to add a child profile.',
+          error: 'Sign in with Google to add a child profile.',
         };
       }
       if (!ch.name.trim()) {
         return { ok: false, error: 'Child Name and Class/Grade are required.' };
       }
       const parent = parents.find((p) => p.id === parentId);
-      const effectiveAgentId = agentId || parent?.createdByAgentId || 'ag';
-      const agent = agents.find((a) => a.id === effectiveAgentId);
+      const agent = agents.find((a) => a.id === agentId);
       if (!parent) {
         return { ok: false, error: 'Parent record not found.' };
       }
@@ -3021,12 +2504,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const newChild: ChildProfile = {
         id: makeId('ch'),
         workspaceId: WORKSPACE_ID,
-        ownerUid: user?.uid || parent.ownerUid,
+        ownerUid: user.uid,
         parentId,
-        createdByAgentId: effectiveAgentId,
+        createdByAgentId: agentId,
         parentEmail: parent.email,
-        parentPhoneEmail: parent.phoneAuthEmail ?? '',
-        passwordAuthEnabled: Boolean(parent.passwordAuthEnabled),
         agentEmail: agent?.email ?? parent.agentEmail,
         name: ch.name.trim(),
         grade: normalizeIndianClass(ch.grade),
@@ -3036,18 +2517,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         createdAtMs: now,
         updatedAtMs: now,
       };
-
-      if (!isConfigured) {
-        const local = loadLocalGrowthState();
-        local.children = [newChild, ...(local.children ?? [])];
-        saveLocalGrowthState(local);
-        setChildren(local.children);
-        return { ok: true };
-      }
-
-      if (!user) {
-        return { ok: false, error: 'Sign in required.' };
-      }
 
       try {
         await cloudCreateChild(user, newChild);
@@ -3062,17 +2531,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     [agents, isConfigured, parents, user]
   );
 
-  const adminAddChildToParent = useCallback(
-    async (parentId: string, child: ChildOnboardingInput) => {
-      const parent = parents.find((p) => p.id === parentId);
-      if (!parent) {
-        return { ok: false, error: 'Parent record not found.' };
-      }
-      return addChildToParent(parentId, parent.createdByAgentId, child);
-    },
-    [addChildToParent, parents]
-  );
-
   const renewParentSubscription = useCallback(
     async (input: {
       parentId: string;
@@ -3082,10 +2540,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       receiptNote: string;
       startDate: string;
     }) => {
-      if (isConfigured && !user) {
+      if (!user || !isConfigured) {
         return {
           ok: false,
-          error: 'Sign in first to record a renewal.',
+          error: 'Sign in with Google to record a renewal.',
         };
       }
       const parent = parents.find((p) => p.id === input.parentId);
@@ -3099,11 +2557,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const renewal: SubscriptionRecord = {
         id: makeId('sub'),
         workspaceId: WORKSPACE_ID,
-        ownerUid: user?.uid || parent.ownerUid,
+        ownerUid: user.uid,
         parentId: input.parentId,
         parentEmail: parent.email,
-        parentPhoneEmail: parent.phoneAuthEmail ?? '',
-        passwordAuthEnabled: Boolean(parent.passwordAuthEnabled),
         agentEmail: agent?.email ?? parent.agentEmail,
         planType: 'yearly',
         startDate,
@@ -3116,18 +2572,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         createdAtMs: now,
         updatedAtMs: now,
       };
-
-      if (!isConfigured) {
-        const local = loadLocalGrowthState();
-        local.subscriptions = [renewal, ...(local.subscriptions ?? [])];
-        saveLocalGrowthState(local);
-        setSubscriptions(local.subscriptions);
-        return { ok: true };
-      }
-
-      if (!user) {
-        return { ok: false, error: 'Sign in required.' };
-      }
 
       try {
         await cloudCreateSubscription(user, renewal);
@@ -3148,7 +2592,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const recordChildPractice = useCallback(
     async (childId: string, session: SessionRecord): Promise<boolean> => {
-      if (isConfigured && !user) return false;
+      if (!user || !isConfigured) return false;
       const child = children.find((c) => c.id === childId);
       if (!child) return false;
 
@@ -3188,12 +2632,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const practiceDoc: PracticeSession = {
         id: makeId('ps'),
         workspaceId: WORKSPACE_ID,
-        ownerUid: user?.uid || child.ownerUid,
+        ownerUid: user.uid,
         childId: child.id,
         parentId: child.parentId,
         parentEmail: child.parentEmail,
-        parentPhoneEmail: child.parentPhoneEmail ?? '',
-        passwordAuthEnabled: Boolean(child.passwordAuthEnabled),
         agentEmail: child.agentEmail,
         grade: normalizeIndianClass(session.grade ?? child.grade),
         mode: session.mode,
@@ -3216,27 +2658,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const nextTotalScore = (child.totalScore || 0) + Math.max(0, session.score);
       const nextSessionsCount = (child.sessionsCount || 0) + 1;
       const nextBestStreak = Math.max(child.bestStreak || 0, session.bestStreak);
-
-      if (!isConfigured) {
-        const local = loadLocalGrowthState();
-        local.children = (local.children ?? []).map((c) =>
-          c.id === childId
-            ? {
-                ...c,
-                totalScore: nextTotalScore,
-                sessionsCount: nextSessionsCount,
-                bestStreak: nextBestStreak,
-                updatedAtMs: Date.now(),
-              }
-            : c
-        );
-        saveLocalGrowthState(local);
-        setChildren(local.children);
-        setPracticeSessions((prev) => [practiceDoc, ...prev]);
-        return true;
-      }
-
-      if (!user) return false;
 
       try {
         await cloudCreatePracticeSession(user, practiceDoc);
@@ -3307,9 +2728,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogleRedirectFlow,
       loginAgentPhonePassword,
       loginAgentPasscode,
-      loginParentCredentials,
       loginParentPasscode,
-      changeParentPassword,
       registerSalesAgent,
       updateAgentSelfProfile,
       changeAgentPassword,
@@ -3322,9 +2741,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       toggleAgentActive,
       setAgentApprovalStatus,
       adminOverrideSubscription,
-      adminUpdateParent,
-      adminUpdateChild,
-      adminAddChildToParent,
       markPayoutPaid,
       generateOfflineVoucher,
       updateAppConfig,
@@ -3385,9 +2801,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogleRedirectFlow,
       loginAgentPhonePassword,
       loginAgentPasscode,
-      loginParentCredentials,
       loginParentPasscode,
-      changeParentPassword,
       registerSalesAgent,
       updateAgentSelfProfile,
       changeAgentPassword,
@@ -3400,9 +2814,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       toggleAgentActive,
       setAgentApprovalStatus,
       adminOverrideSubscription,
-      adminUpdateParent,
-      adminUpdateChild,
-      adminAddChildToParent,
       markPayoutPaid,
       generateOfflineVoucher,
       updateAppConfig,

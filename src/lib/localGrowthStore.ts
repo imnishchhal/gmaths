@@ -2,14 +2,11 @@ import { CustomPreset } from '../types/math';
 import {
   AgentProfile,
   AppGlobalConfig,
-  ChildProfile,
   DEFAULT_APP_CONFIG,
   OfflineVoucher,
-  ParentProfile,
   PayoutRequest,
   ReferralCodePublic,
   StudentSubscription,
-  SubscriptionRecord,
   TrialLead,
 } from '../types/platform';
 
@@ -19,9 +16,6 @@ const FALLBACK_KEY = 'gmaths_local_growth_db_v1';
 
 export interface LocalGrowthState {
   agents: AgentProfile[];
-  parents?: ParentProfile[];
-  children?: ChildProfile[];
-  subscriptions?: SubscriptionRecord[];
   referralCodes: Record<string, ReferralCodePublic>;
   leads: TrialLead[];
   studentSubscriptions: StudentSubscription[];
@@ -114,9 +108,6 @@ export function incrementFreeAdaptiveUsedCount(scopeKey?: string): number {
 export function loadLocalGrowthState(): LocalGrowthState {
   const empty: LocalGrowthState = {
     agents: [],
-    parents: [],
-    children: [],
-    subscriptions: [],
     referralCodes: {},
     leads: [],
     studentSubscriptions: [],
@@ -131,9 +122,6 @@ export function loadLocalGrowthState(): LocalGrowthState {
     const parsed = JSON.parse(raw) as Partial<LocalGrowthState>;
     return {
       agents: Array.isArray(parsed.agents) ? parsed.agents : [],
-      parents: Array.isArray(parsed.parents) ? parsed.parents : [],
-      children: Array.isArray(parsed.children) ? parsed.children : [],
-      subscriptions: Array.isArray(parsed.subscriptions) ? parsed.subscriptions : [],
       referralCodes:
         parsed.referralCodes && typeof parsed.referralCodes === 'object'
           ? parsed.referralCodes

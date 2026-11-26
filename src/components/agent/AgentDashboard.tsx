@@ -394,9 +394,8 @@ export const AgentDashboard: React.FC = () => {
       return;
     }
 
-    const displayId = parentEmail.trim().toLowerCase() || parentContact.trim();
     setNotice(
-      `Onboarded ${parentName} (${displayId}) with ${childRows.length} ${
+      `Onboarded ${parentName} (${parentEmail.trim().toLowerCase()}) with ${childRows.length} ${
         childRows.length === 1 ? 'child' : 'children'
       }. Yearly plan valid through ${formatIsoDate(computedExpiry)}.`
     );
@@ -1501,35 +1500,35 @@ export const AgentDashboard: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Parent Email (Optional)
+                  Parent Google Email *
                 </label>
                 <input
                   type="email"
+                  required
                   value={parentEmail}
                   onChange={(e) => setParentEmail(e.target.value)}
-                  placeholder="Optional (parent@gmail.com)"
+                  placeholder="parent@gmail.com"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Login Password * (min 6 chars)
+                  Backup Passcode / PIN *
                 </label>
                 <input
                   type="text"
                   required
-                  minLength={6}
                   value={parentPasscode}
                   onChange={(e) => setParentPasscode(e.target.value)}
-                  placeholder="e.g. parent123"
+                  placeholder="e.g. 4820"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Parents sign in at /parent using their Mobile Number (or Email if
-              entered) + Password, or via Google Sign-In — no child passwords
+              Parents sign in with their Google Email on any phone or computer
+              and tap any child card to begin practice — no child passwords
               needed.
             </p>
           </div>

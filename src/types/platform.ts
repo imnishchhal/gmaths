@@ -67,10 +67,6 @@ export interface ParentProfile {
   contact: string;
   /** Lowercase Google Sign-In email for cross-device Parent access */
   email: string;
-  /** Synthetic email (parent.<digits>@gmaths.local) for Mobile+Password Parent login */
-  phoneAuthEmail?: string;
-  /** True only when Firebase Email+Password auth was provisioned for `email` */
-  passwordAuthEnabled?: boolean;
   passcodeHash: string;
   createdByAgentId: string;
   /** Denormalized agent metadata so Parents see renewal contact directly without cross-collection reads */
@@ -91,8 +87,6 @@ export interface ChildProfile {
   parentId: string;
   createdByAgentId: string;
   parentEmail: string;
-  parentPhoneEmail?: string;
-  passwordAuthEnabled?: boolean;
   agentEmail: string;
   name: string;
   grade: IndianClass;
@@ -126,8 +120,6 @@ export interface SubscriptionRecord {
   ownerUid: string;
   parentId: string;
   parentEmail: string;
-  parentPhoneEmail?: string;
-  passwordAuthEnabled?: boolean;
   agentEmail: string;
   planType: 'yearly';
   /** ISO calendar date YYYY-MM-DD */
@@ -232,8 +224,6 @@ export interface PracticeSession {
   childId: string;
   parentId: string;
   parentEmail: string;
-  parentPhoneEmail?: string;
-  passwordAuthEnabled?: boolean;
   agentEmail: string;
   grade: IndianClass;
   mode: ArithmeticMode;

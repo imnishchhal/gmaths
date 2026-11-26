@@ -94,32 +94,15 @@ export const isFirebaseConfigured = firebaseReady;
 
 export { app, db, auth, googleProvider, firebaseConfig };
 
-export interface SecondaryProvisionOutcome {
-  uid: string | null;
-  created: boolean;
-  code?: string;
-  error?: string;
-}
-
 /**
  * Creates a Firebase Email/Password auth user in an isolated secondary app instance
- * so an active Admin or Agent session is never signed out when provisioning accounts.
+ * so an active Admin Google session is never signed out when provisioning an Agent.
  */
-export async function provisionSecondaryAuthAccount(
+export async function provisionAgentAuthAccount(
   authEmail: string,
   password: string
-): Promise<SecondaryProvisionOutcome> {
-  if (!firebaseReady || !hasValidConfig(firebaseConfig)) {
-    return { uid: null, created: false, error: 'Firebase not configured.' };
-  }
-  const cleanEmail = authEmail.trim().toLowerCase();
-  if (!cleanEmail || password.length < 6) {
-    return {
-      uid: null,
-      created: false,
-      error: 'Valid login identifier and 6+ character password required.',
-    };
-  }
+): Promise<string | null> {
+  if (!firebaseReady || !hasValidConfig(firebaseConfig)) return null;
   const secondaryApp =
     getApps().find((item) => item.name === 'agent_provisioner') ??
     initializeApp(firebaseConfig, 'agent_provisioner');
@@ -127,38 +110,13 @@ export async function provisionSecondaryAuthAccount(
   try {
     const credential = await createUserWithEmailAndPassword(
       secondaryAuth,
-      cleanEmail,
+      authEmail,
       password
     );
-    return { uid: credential.user.uid, created: true };
-  } catch (err) {
-    const code =
-      err && typeof err === 'object' && 'code' in err
-        ? String((err as { code?: unknown }).code ?? '')
-        : '';
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      uid: null,
-      created: false,
-      code,
-      error: message,
-    };
+    return credential.user.uid;
   } finally {
     await signOut(secondaryAuth).catch(() => {});
   }
-}
-
-export async function provisionAgentAuthAccount(
-  authEmail: string,
-  password: string
-): Promise<string | null> {
-  const outcome = await provisionSecondaryAuthAccount(authEmail, password);
-  if (!outcome.created && outcome.code && outcome.code !== 'auth/email-already-in-use') {
-    const err = new Error(outcome.error || outcome.code) as Error & { code?: string };
-    err.code = outcome.code;
-    throw err;
-  }
-  return outcome.uid;
 }
 
 export enum OperationType {

@@ -16,7 +16,7 @@ import {
 import { useFirebase } from '../../context/FirebaseContext';
 import { usePlatform } from '../../context/PlatformContext';
 import { PlatformRoute } from '../../types/platform';
-import { isLocalSyntheticAuthEmail } from '../../utils/referral';
+import { isPhoneAgentAuthEmail } from '../../utils/referral';
 
 type AuthPortalRole = 'admin' | 'agent' | 'parent';
 
@@ -65,13 +65,13 @@ const ROLE_COPY: Record<
   parent: {
     title: 'Parent Portal Sign-In',
     subtitle:
-      'Sign in with your registered mobile number or email and password, or use Google Sign-In to manage your children and start practice.',
+      'Check your yearly plan status, monitor child scores, and tap any child card to start math practice.',
     googleHint:
-      'Or sign in with the Google email linked by your field Agent. Children switch directly inside your dashboard — no child passwords needed.',
+      'Sign in with the Google email registered by your field Agent. Children switch directly inside your dashboard — no child passwords needed.',
     idLabel: 'Registered Mobile or Email',
     idPlaceholder: 'Enter mobile or email from Agent',
-    secretLabel: 'Parent Password',
-    secretPlaceholder: 'Enter password',
+    secretLabel: 'Parent Passcode',
+    secretPlaceholder: 'Enter passcode',
     submitLabel: 'Switch to Parent Portal',
   },
 };
@@ -88,7 +88,6 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
     signInWithGoogleRedirectFlow,
     loginAgentPhonePassword,
     loginAgentPasscode,
-    loginParentCredentials,
     loginParentPasscode,
     registerSalesAgent,
     logoutRole,
@@ -99,12 +98,6 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
   const [agentPassword, setAgentPassword] = useState('');
   const [showAgentPassword, setShowAgentPassword] = useState(false);
   const [submittingAgentLogin, setSubmittingAgentLogin] = useState(false);
-
-  // Primary Parent Mobile/Email + Password login state
-  const [parentLoginId, setParentLoginId] = useState('');
-  const [parentLoginPassword, setParentLoginPassword] = useState('');
-  const [showParentLoginPassword, setShowParentLoginPassword] = useState(false);
-  const [submittingParentLogin, setSubmittingParentLogin] = useState(false);
 
   // Sales Partner Registration (Phone + Password)
   const [showPartnerSignup, setShowPartnerSignup] = useState(false);
@@ -155,19 +148,6 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
     onNavigateRoute('/agent');
   };
 
-  const handleParentCredentialsSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSubmittingParentLogin(true);
-    const res = await loginParentCredentials(parentLoginId, parentLoginPassword);
-    setSubmittingParentLogin(false);
-    if (!res.ok) {
-      setError(res.error || 'Incorrect mobile number/email or password.');
-      return;
-    }
-    onNavigateRoute('/parent');
-  };
-
   const handlePasscodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -206,8 +186,8 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
 
   const combinedError = error || authError || roleResolveNotice;
   const activeEmailDisplay =
-    user?.email && isLocalSyntheticAuthEmail(user.email)
-      ? user.email.replace(/^(agent|parent)\./, '').replace(/@gmaths\.local$/, '')
+    user?.email && isPhoneAgentAuthEmail(user.email)
+      ? user.email.replace(/^agent\./, '').replace(/@gmaths\.local$/, '')
       : user?.email;
 
   return (
@@ -541,93 +521,9 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
           </>
         ) : (
           /* ================================================================= */
-          /* PARENT (MOBILE/EMAIL + PASSWORD & GOOGLE) + ADMIN (GOOGLE)        */
+          /* ADMIN & PARENT PORTALS: GOOGLE SIGN-IN + PASSCODE SWITCH          */
           /* ================================================================= */
           <>
-            {targetRole === 'parent' && (
-              <>
-                <form
-                  onSubmit={handleParentCredentialsSubmit}
-                  className="space-y-3.5"
-                >
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor="parent-login-identifier"
-                      className="block text-xs font-bold text-slate-900 dark:text-white"
-                    >
-                      Mobile Number or Email *
-                    </label>
-                    <input
-                      id="parent-login-identifier"
-                      type="text"
-                      autoComplete="username"
-                      required
-                      value={parentLoginId}
-                      onChange={(e) => setParentLoginId(e.target.value)}
-                      placeholder="e.g. 9811223344 or parent@gmail.com"
-                      className="w-full min-h-[46px] px-3.5 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor="parent-login-password"
-                      className="block text-xs font-bold text-slate-900 dark:text-white"
-                    >
-                      Password *
-                    </label>
-                    <div className="relative">
-                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        id="parent-login-password"
-                        type={showParentLoginPassword ? 'text' : 'password'}
-                        autoComplete="current-password"
-                        required
-                        value={parentLoginPassword}
-                        onChange={(e) => setParentLoginPassword(e.target.value)}
-                        placeholder="Enter password from your Agent"
-                        className="w-full min-h-[46px] pl-10 pr-12 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowParentLoginPassword((v) => !v)}
-                        aria-label={
-                          showParentLoginPassword
-                            ? 'Hide password'
-                            : 'Show password'
-                        }
-                        className="absolute right-0.5 top-0.5 min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                      >
-                        {showParentLoginPassword ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={submittingParentLogin || authLoading}
-                    className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white font-display text-sm sm:text-base font-bold transition-all whitespace-nowrap"
-                  >
-                    {submittingParentLogin || authLoading
-                      ? 'Signing In…'
-                      : 'Sign In to Parent Portal'}
-                  </button>
-                </form>
-
-                <div className="flex items-center gap-3">
-                  <span className="h-px flex-1 bg-sky-100 dark:bg-slate-800" />
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    or
-                  </span>
-                  <span className="h-px flex-1 bg-sky-100 dark:bg-slate-800" />
-                </div>
-              </>
-            )}
-
             {isConfigured ? (
               <div className="space-y-3">
                 {!user ? (
@@ -636,11 +532,7 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
                       type="button"
                       disabled={authLoading}
                       onClick={() => void handleGoogleSignIn()}
-                      className={`w-full min-h-[48px] px-4 py-3 rounded-2xl border-b-4 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white font-display text-sm sm:text-base font-bold transition-all whitespace-nowrap ${
-                        targetRole === 'parent'
-                          ? 'bg-sky-500 hover:bg-sky-600 border-sky-700'
-                          : 'bg-orange-500 hover:bg-orange-600 border-orange-700'
-                      }`}
+                      className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white font-display text-sm sm:text-base font-bold transition-all whitespace-nowrap"
                     >
                       {authLoading
                         ? 'Connecting Google…'

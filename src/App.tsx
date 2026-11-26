@@ -50,7 +50,7 @@ import {
   getAgentApprovalStatus,
 } from './types/platform';
 import { soundEngine } from './utils/sound';
-import { isPhoneAgentAuthEmail } from './utils/referral';
+import { isLocalSyntheticAuthEmail } from './utils/referral';
 
 const CONFIG_STORAGE_KEY = 'math_speedster_config_v2';
 const THEME_STORAGE_KEY = 'math_speedster_theme_v1';
@@ -170,7 +170,7 @@ const MathSpeedsterShell: React.FC = () => {
     if (
       user?.email &&
       capturedReferralCode &&
-      !isPhoneAgentAuthEmail(user.email)
+      !isLocalSyntheticAuthEmail(user.email)
     ) {
       void recordTrialLeadIfReferred(user.displayName || '', user.email);
     }

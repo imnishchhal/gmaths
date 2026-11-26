@@ -28,12 +28,18 @@ import {
 } from 'lucide-react';
 import { useFirebase } from '../../context/FirebaseContext';
 import { usePlatform } from '../../context/PlatformContext';
-import { formatIndianClassLabel } from '../../types/math';
+import {
+  INDIAN_CLASSES,
+  IndianClass,
+  formatIndianClassLabel,
+} from '../../types/math';
 import {
   AgentApprovalStatus,
   AgentProfile,
+  ChildProfile,
   ComputedSubscriptionState,
   PAYMENT_METHOD_LABELS,
+  ParentProfile,
   computeAgentCommissionSummary,
   evaluateSubscriptionState,
   formatCurrency,
@@ -41,7 +47,10 @@ import {
   getAgentApprovalStatus,
   isSuspiciousSpeedRun,
 } from '../../types/platform';
-import { isPhoneAgentAuthEmail } from '../../utils/referral';
+import {
+  isLocalSyntheticAuthEmail,
+  isPhoneAgentAuthEmail,
+} from '../../utils/referral';
 
 type AdminTab = 'agents' | 'subscriptions' | 'payouts' | 'leaderboard';
 type SubFilter = 'all' | ComputedSubscriptionState;
@@ -94,6 +103,9 @@ export const AdminDashboard: React.FC = () => {
     updateAgent,
     setAgentApprovalStatus,
     adminOverrideSubscription,
+    adminUpdateParent,
+    adminUpdateChild,
+    adminAddChildToParent,
     markPayoutPaid,
     generateOfflineVoucher,
     updateAppConfig,
@@ -121,6 +133,34 @@ export const AdminDashboard: React.FC = () => {
   const [subQuery, setSubQuery] = useState('');
   const [overrideNotice, setOverrideNotice] = useState<string | null>(null);
   const [busyParentId, setBusyParentId] = useState<string | null>(null);
+
+  // Parent & Child Inline Editing State (Tab 2)
+  const [editingParentId, setEditingParentId] = useState<string | null>(null);
+  const [parentEditForm, setParentEditForm] = useState({
+    name: '',
+    contact: '',
+    email: '',
+    newPassword: '',
+  });
+  const [showParentEditPassword, setShowParentEditPassword] = useState(false);
+  const [savingParentEdit, setSavingParentEdit] = useState(false);
+
+  const [editingChildId, setEditingChildId] = useState<string | null>(null);
+  const [childEditForm, setChildEditForm] = useState<{
+    name: string;
+    grade: IndianClass;
+  }>({ name: '', grade: '1st' });
+  const [savingChildEdit, setSavingChildEdit] = useState(false);
+
+  const [addingChildParentId, setAddingChildParentId] = useState<string | null>(
+    null
+  );
+  const [newChildForm, setNewChildForm] = useState<{
+    name: string;
+    grade: IndianClass;
+  }>({ name: '', grade: '1st' });
+  const [savingAdminChild, setSavingAdminChild] = useState(false);
+  const [familyEditError, setFamilyEditError] = useState<string | null>(null);
 
   // Payouts & Vouchers State
   const [utrByPayoutId, setUtrByPayoutId] = useState<Record<string, string>>({});
@@ -293,6 +333,9 @@ export const AdminDashboard: React.FC = () => {
         return (
           row.parent.name.toLowerCase().includes(q) ||
           row.parent.contact.toLowerCase().includes(q) ||
+          (row.parent.email
+            ? row.parent.email.toLowerCase().includes(q)
+            : false) ||
           (row.agent?.name.toLowerCase().includes(q) ?? false) ||
           row.linkedChildren.some(
             (c) =>
@@ -466,6 +509,107 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const openParentEdit = (parent: ParentProfile) => {
+    setFamilyEditError(null);
+    setEditingChildId(null);
+    setAddingChildParentId(null);
+    setShowParentEditPassword(false);
+    setEditingParentId(parent.id);
+    setParentEditForm({
+      name: parent.name,
+      contact: parent.contact,
+      email:
+        parent.email && !isLocalSyntheticAuthEmail(parent.email)
+          ? parent.email
+          : '',
+      newPassword: '',
+    });
+  };
+
+  const handleSaveParentEdit = async (e: React.FormEvent, parentId: string) => {
+    e.preventDefault();
+    setFamilyEditError(null);
+    setSavingParentEdit(true);
+    const res = await adminUpdateParent(parentId, {
+      name: parentEditForm.name,
+      contact: parentEditForm.contact,
+      email: parentEditForm.email,
+      newPassword: parentEditForm.newPassword.trim() || undefined,
+    });
+    setSavingParentEdit(false);
+    if (!res.ok) {
+      setFamilyEditError(res.error || 'Could not update Parent details.');
+      return;
+    }
+    setEditingParentId(null);
+    setParentEditForm({ name: '', contact: '', email: '', newPassword: '' });
+    setOverrideNotice(
+      res.warning
+        ? `Updated Parent details (${res.warning})`
+        : 'Updated Parent details and synced family records.'
+    );
+    setTimeout(() => setOverrideNotice(null), 5000);
+  };
+
+  const openChildEdit = (child: ChildProfile) => {
+    setFamilyEditError(null);
+    setEditingParentId(null);
+    setAddingChildParentId(null);
+    setEditingChildId(child.id);
+    setChildEditForm({
+      name: child.name,
+      grade: child.grade,
+    });
+  };
+
+  const handleSaveChildEdit = async (e: React.FormEvent, childId: string) => {
+    e.preventDefault();
+    setFamilyEditError(null);
+    setSavingChildEdit(true);
+    const res = await adminUpdateChild(childId, {
+      name: childEditForm.name,
+      grade: childEditForm.grade,
+    });
+    setSavingChildEdit(false);
+    if (!res.ok) {
+      setFamilyEditError(res.error || 'Could not update Child details.');
+      return;
+    }
+    setEditingChildId(null);
+    setOverrideNotice('Updated Child profile and leaderboard entry.');
+    setTimeout(() => setOverrideNotice(null), 4000);
+  };
+
+  const openAdminAddChild = (parentId: string) => {
+    setFamilyEditError(null);
+    setEditingParentId(null);
+    setEditingChildId(null);
+    setAddingChildParentId(parentId);
+    setNewChildForm({ name: '', grade: '1st' });
+  };
+
+  const handleSaveAdminAddChild = async (
+    e: React.FormEvent,
+    parentId: string
+  ) => {
+    e.preventDefault();
+    setFamilyEditError(null);
+    setSavingAdminChild(true);
+    const res = await adminAddChildToParent(parentId, {
+      name: newChildForm.name,
+      grade: newChildForm.grade,
+    });
+    setSavingAdminChild(false);
+    if (!res.ok) {
+      setFamilyEditError(res.error || 'Could not add Child profile.');
+      return;
+    }
+    setAddingChildParentId(null);
+    setNewChildForm({ name: '', grade: '1st' });
+    setOverrideNotice('Added Child profile to Parent family.');
+    setTimeout(() => setOverrideNotice(null), 4000);
+  };
+
   const handleMarkPayoutPaid = async (payoutId: string) => {
     const utr = (utrByPayoutId[payoutId] || '').trim();
     if (utr.length < 4) {
@@ -625,7 +769,7 @@ export const AdminDashboard: React.FC = () => {
         {(
           [
             { id: 'agents', label: `Agents (${agents.length})` },
-            { id: 'subscriptions', label: `Plans (${parents.length})` },
+            { id: 'subscriptions', label: `Families (${parents.length})` },
             {
               id: 'payouts',
               label: `Payouts (${
@@ -1298,7 +1442,12 @@ export const AdminDashboard: React.FC = () => {
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 dark:text-slate-400 break-words">
-                          {row.parent.contact} · Agent:{' '}
+                          {row.parent.contact}
+                          {row.parent.email &&
+                          !isLocalSyntheticAuthEmail(row.parent.email)
+                            ? ` · ${row.parent.email}`
+                            : ''}{' '}
+                          · Agent:{' '}
                           <span className="font-medium text-slate-800 dark:text-slate-200">
                             {row.agent ? `${row.agent.name} (${row.agent.agentCode})` : 'Unassigned'}
                           </span>
@@ -1333,12 +1482,7 @@ export const AdminDashboard: React.FC = () => {
                           Children ({row.linkedChildren.length}):{' '}
                         </span>
                         {row.linkedChildren.length > 0
-                          ? row.linkedChildren
-                              .map(
-                                (c) =>
-                                  `${c.name} (${formatIndianClassLabel(c.grade)})`
-                              )
-                              .join(', ')
+                          ? `${row.linkedChildren.length} linked`
                           : 'None'}
                       </div>
                     </div>
@@ -1349,8 +1493,360 @@ export const AdminDashboard: React.FC = () => {
                       </p>
                     )}
 
-                    {/* Manual Override Actions */}
+                    {/* Family Edit Error Banner (for active card) */}
+                    {familyEditError &&
+                      (editingParentId === row.parent.id ||
+                        addingChildParentId === row.parent.id ||
+                        row.linkedChildren.some((c) => c.id === editingChildId)) && (
+                        <div className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3.5 py-2.5 flex items-center gap-2 text-xs sm:text-sm text-red-700 dark:text-red-300">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span>{familyEditError}</span>
+                        </div>
+                      )}
+
+                    {/* Inline Parent Edit Form */}
+                    {editingParentId === row.parent.id && (
+                      <form
+                        onSubmit={(e) => void handleSaveParentEdit(e, row.parent.id)}
+                        className="rounded-xl border border-blue-200 dark:border-blue-900/60 bg-slate-50 dark:bg-slate-950/70 p-4 space-y-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                            Edit Parent Details
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingParentId(null);
+                              setFamilyEditError(null);
+                            }}
+                            aria-label="Close parent edit form"
+                            className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                              Parent Full Name *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={parentEditForm.name}
+                              onChange={(e) =>
+                                setParentEditForm((f) => ({
+                                  ...f,
+                                  name: e.target.value,
+                                }))
+                              }
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                              Mobile Number *
+                            </label>
+                            <input
+                              type="tel"
+                              required
+                              value={parentEditForm.contact}
+                              onChange={(e) =>
+                                setParentEditForm((f) => ({
+                                  ...f,
+                                  contact: e.target.value,
+                                }))
+                              }
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                              Email (Optional)
+                            </label>
+                            <input
+                              type="email"
+                              value={parentEditForm.email}
+                              onChange={(e) =>
+                                setParentEditForm((f) => ({
+                                  ...f,
+                                  email: e.target.value,
+                                }))
+                              }
+                              placeholder="parent@example.com"
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                              New Login Password (Optional, min 6 chars)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={showParentEditPassword ? 'text' : 'password'}
+                                minLength={6}
+                                value={parentEditForm.newPassword}
+                                onChange={(e) =>
+                                  setParentEditForm((f) => ({
+                                    ...f,
+                                    newPassword: e.target.value,
+                                  }))
+                                }
+                                placeholder="Leave blank to keep current"
+                                className="w-full min-h-[44px] pl-3 pr-11 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setShowParentEditPassword((s) => !s)
+                                }
+                                aria-label={
+                                  showParentEditPassword
+                                    ? 'Hide password'
+                                    : 'Show password'
+                                }
+                                className="absolute right-1 top-1/2 -translate-y-1/2 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                              >
+                                {showParentEditPassword ? (
+                                  <EyeOff className="w-4 h-4" />
+                                ) : (
+                                  <Eye className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingParentId(null);
+                              setFamilyEditError(null);
+                            }}
+                            className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={savingParentEdit}
+                            className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold"
+                          >
+                            {savingParentEdit ? 'Saving…' : 'Save Parent'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* Children List with Individual Edit Actions */}
+                    <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          Linked Children ({row.linkedChildren.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openAdminAddChild(row.parent.id)}
+                          className="min-h-[36px] px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5 shrink-0" />
+                          Add Child
+                        </button>
+                      </div>
+
+                      {row.linkedChildren.length === 0 ? (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          No children linked yet.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {row.linkedChildren.map((child) => (
+                            <div
+                              key={child.id}
+                              className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/50 px-3 py-2.5"
+                            >
+                              {editingChildId === child.id ? (
+                                <form
+                                  onSubmit={(e) =>
+                                    void handleSaveChildEdit(e, child.id)
+                                  }
+                                  className="flex flex-col sm:flex-row sm:items-end gap-2.5"
+                                >
+                                  <div className="flex-1 space-y-1">
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                                      Child Name *
+                                    </label>
+                                    <input
+                                      type="text"
+                                      required
+                                      value={childEditForm.name}
+                                      onChange={(e) =>
+                                        setChildEditForm((f) => ({
+                                          ...f,
+                                          name: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                                    />
+                                  </div>
+
+                                  <div className="sm:w-44 space-y-1">
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                                      Class / Grade *
+                                    </label>
+                                    <select
+                                      value={childEditForm.grade}
+                                      onChange={(e) =>
+                                        setChildEditForm((f) => ({
+                                          ...f,
+                                          grade: e.target.value as IndianClass,
+                                        }))
+                                      }
+                                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                                    >
+                                      {INDIAN_CLASSES.map((cls) => (
+                                        <option key={cls} value={cls}>
+                                          {formatIndianClassLabel(cls)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingChildId(null);
+                                        setFamilyEditError(null);
+                                      }}
+                                      className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="submit"
+                                      disabled={savingChildEdit}
+                                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold"
+                                    >
+                                      {savingChildEdit ? 'Saving…' : 'Save'}
+                                    </button>
+                                  </div>
+                                </form>
+                              ) : (
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                                      {child.name}
+                                    </p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                                      {formatIndianClassLabel(child.grade)} ·{' '}
+                                      {child.totalScore} pts
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openChildEdit(child)}
+                                    className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 shrink-0"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                                    Edit
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Inline Add Child Form */}
+                      {addingChildParentId === row.parent.id && (
+                        <form
+                          onSubmit={(e) =>
+                            void handleSaveAdminAddChild(e, row.parent.id)
+                          }
+                          className="rounded-xl border border-blue-200 dark:border-blue-900/60 bg-slate-50 dark:bg-slate-950/70 p-3 flex flex-col sm:flex-row sm:items-end gap-2.5"
+                        >
+                          <div className="flex-1 space-y-1">
+                            <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                              New Child Name *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={newChildForm.name}
+                              onChange={(e) =>
+                                setNewChildForm((f) => ({
+                                  ...f,
+                                  name: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. Aarav"
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            />
+                          </div>
+
+                          <div className="sm:w-44 space-y-1">
+                            <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                              Class / Grade *
+                            </label>
+                            <select
+                              value={newChildForm.grade}
+                              onChange={(e) =>
+                                setNewChildForm((f) => ({
+                                  ...f,
+                                  grade: e.target.value as IndianClass,
+                                }))
+                              }
+                              className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            >
+                              {INDIAN_CLASSES.map((cls) => (
+                                <option key={cls} value={cls}>
+                                  {formatIndianClassLabel(cls)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddingChildParentId(null);
+                                setFamilyEditError(null);
+                              }}
+                              className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingAdminChild}
+                              className="min-h-[44px] px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold"
+                            >
+                              {savingAdminChild ? 'Adding…' : 'Add Child'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+
+                    {/* Manual Override & Family Actions */}
                     <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => openParentEdit(row.parent)}
+                        className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <Edit3 className="w-4 h-4 shrink-0" />
+                        Edit Parent
+                      </button>
+
                       <button
                         type="button"
                         disabled={isBusy}

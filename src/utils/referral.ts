@@ -38,6 +38,36 @@ export function isPhoneAgentAuthEmail(
   return /^agent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
 }
 
+export function buildParentAuthEmail(phone: string): string {
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 7) return '';
+  return `parent.${digits}@gmaths.local`;
+}
+
+export function isPhoneParentAuthEmail(
+  email: string | null | undefined
+): boolean {
+  const clean = normalizeEmailLower(email);
+  return /^parent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
+}
+
+export function isLocalSyntheticAuthEmail(
+  email: string | null | undefined
+): boolean {
+  return isPhoneAgentAuthEmail(email) || isPhoneParentAuthEmail(email);
+}
+
+export function formatParentAccountDisplay(
+  email: string | null | undefined,
+  contact?: string
+): string {
+  const clean = normalizeEmailLower(email);
+  if (!clean || isLocalSyntheticAuthEmail(clean)) {
+    return contact?.trim() || 'Mobile Account';
+  }
+  return clean;
+}
+
 export async function hashContactForAttribution(raw: string): Promise<string> {
   if (!raw.trim()) return '';
   return hashSecret(raw.trim().toLowerCase());

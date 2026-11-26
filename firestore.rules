@@ -28,8 +28,30 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
 
-    function isAuthorizedAppUser() {
+    function isPhoneParentAuth() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('^parent\\.[0-9]{7,15}@gmaths\\.local$')
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+
+    function isEmailPasswordParentAuth() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.size() >= 3
+        && !request.auth.token.email.lower().matches('^.+@gmaths\\.local$')
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+
+    function isTrustedAgentIdentity() {
       return isVerifiedUser() || isPhoneAgentAuth();
+    }
+
+    function isAuthorizedAppUser() {
+      return isVerifiedUser()
+        || isPhoneAgentAuth()
+        || isPhoneParentAuth()
+        || isEmailPasswordParentAuth();
     }
 
     function userEmailLower() {
@@ -51,7 +73,7 @@ service cloud.firestore {
     }
 
     function isAgentRecordAuthorized(data) {
-      return isAuthorizedAppUser() && (
+      return isTrustedAgentIdentity() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
         || (data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
@@ -62,8 +84,10 @@ service cloud.firestore {
       return isAuthorizedAppUser() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
-        || (data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
-        || (data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
+        || (isTrustedAgentIdentity() && data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
+        || (isVerifiedUser() && data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
+        || (isPhoneParentAuth() && 'phoneAuthEmail' in data && data.phoneAuthEmail is string && data.phoneAuthEmail.size() >= 3 && data.phoneAuthEmail == userEmailLower())
+        || (isEmailPasswordParentAuth() && 'passwordAuthEnabled' in data && data.passwordAuthEnabled == true && data.email is string && data.email.size() >= 3 && data.email == userEmailLower())
       );
     }
 
@@ -71,8 +95,10 @@ service cloud.firestore {
       return isAuthorizedAppUser() && (
         data.ownerUid == request.auth.uid
         || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
-        || (data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
-        || (data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail == userEmailLower())
+        || (isTrustedAgentIdentity() && data.agentEmail is string && data.agentEmail.size() >= 3 && data.agentEmail == userEmailLower())
+        || (isVerifiedUser() && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail == userEmailLower())
+        || (isPhoneParentAuth() && 'parentPhoneEmail' in data && data.parentPhoneEmail is string && data.parentPhoneEmail.size() >= 3 && data.parentPhoneEmail == userEmailLower())
+        || (isEmailPasswordParentAuth() && 'passwordAuthEnabled' in data && data.passwordAuthEnabled == true && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail == userEmailLower())
       );
     }
 
@@ -286,7 +312,7 @@ service cloud.firestore {
           'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'email', 'passcodeHash',
+          'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'email', 'phoneAuthEmail', 'passwordAuthEnabled', 'passcodeHash',
           'createdByAgentId', 'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode',
           'createdAt', 'updatedAt'
         ])
@@ -296,6 +322,8 @@ service cloud.firestore {
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
         && data.contact is string && data.contact.size() >= 3 && data.contact.size() <= 120
         && data.email is string && data.email.size() <= 120
+        && (!('phoneAuthEmail' in data) || (data.phoneAuthEmail is string && data.phoneAuthEmail.size() <= 120))
+        && (!('passwordAuthEnabled' in data) || data.passwordAuthEnabled is bool)
         && data.passcodeHash is string && data.passcodeHash.size() >= 16 && data.passcodeHash.size() <= 128
         && isValidId(data.createdByAgentId)
         && data.agentEmail is string && data.agentEmail.size() <= 120
@@ -315,7 +343,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
-          'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
+          'parentEmail', 'parentPhoneEmail', 'passwordAuthEnabled', 'agentEmail', 'name', 'grade', 'totalScore',
           'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id) && data.id == childId
@@ -324,6 +352,8 @@ service cloud.firestore {
         && isValidId(data.parentId)
         && isValidId(data.createdByAgentId)
         && data.parentEmail is string && data.parentEmail.size() <= 120
+        && (!('parentPhoneEmail' in data) || (data.parentPhoneEmail is string && data.parentPhoneEmail.size() <= 120))
+        && (!('passwordAuthEnabled' in data) || data.passwordAuthEnabled is bool)
         && data.agentEmail is string && data.agentEmail.size() <= 120
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
         && isValidIndianClass(data.grade)
@@ -365,7 +395,7 @@ service cloud.firestore {
           'receiptNote', 'collectedByAgentId', 'status', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'workspaceId', 'ownerUid', 'parentId', 'parentEmail', 'agentEmail',
+          'id', 'workspaceId', 'ownerUid', 'parentId', 'parentEmail', 'parentPhoneEmail', 'passwordAuthEnabled', 'agentEmail',
           'planType', 'startDate', 'expiryDate', 'feeAmount', 'paymentMethod',
           'receiptNote', 'collectedByAgentId', 'status', 'createdAt', 'updatedAt'
         ])
@@ -374,6 +404,8 @@ service cloud.firestore {
         && isValidId(data.ownerUid)
         && isValidId(data.parentId)
         && data.parentEmail is string && data.parentEmail.size() <= 120
+        && (!('parentPhoneEmail' in data) || (data.parentPhoneEmail is string && data.parentPhoneEmail.size() <= 120))
+        && (!('passwordAuthEnabled' in data) || data.passwordAuthEnabled is bool)
         && data.agentEmail is string && data.agentEmail.size() <= 120
         && data.planType is string && data.planType == 'yearly'
         && isValidDateString(data.startDate)
@@ -515,7 +547,7 @@ service cloud.firestore {
           'avgResponseMs', 'qpm', 'allowNegatives', 'weakTopic', 'createdAt'
         ])
         && data.keys().hasOnly([
-          'id', 'workspaceId', 'ownerUid', 'childId', 'parentId', 'parentEmail', 'agentEmail',
+          'id', 'workspaceId', 'ownerUid', 'childId', 'parentId', 'parentEmail', 'parentPhoneEmail', 'passwordAuthEnabled', 'agentEmail',
           'grade', 'mode', 'difficulty', 'sessionType', 'durationSec', 'elapsedSec',
           'score', 'attempted', 'correct', 'accuracy', 'bestStreak',
           'avgResponseMs', 'qpm', 'allowNegatives', 'weakTopic', 'createdAt'
@@ -526,6 +558,8 @@ service cloud.firestore {
         && isValidId(data.childId)
         && isValidId(data.parentId)
         && data.parentEmail is string && data.parentEmail.size() <= 120
+        && (!('parentPhoneEmail' in data) || (data.parentPhoneEmail is string && data.parentPhoneEmail.size() <= 120))
+        && (!('passwordAuthEnabled' in data) || data.passwordAuthEnabled is bool)
         && data.agentEmail is string && data.agentEmail.size() <= 120
         && isValidIndianClass(data.grade)
         && isValidMode(data.mode)
@@ -682,14 +716,14 @@ service cloud.firestore {
     // Collection 5: /agents/{agentId} — Field & Sales Agents
     // -------------------------------------------------------------------------
     match /agents/{agentId} {
-      allow get: if isAuthorizedAppUser()
+      allow get: if isTrustedAgentIdentity()
         && isValidId(agentId)
         && (resource == null || isAgentRecordAuthorized(existing()));
 
-      allow list: if isAuthorizedAppUser()
+      allow list: if isTrustedAgentIdentity()
         && isAgentRecordAuthorized(resource.data);
 
-      allow create: if isAuthorizedAppUser()
+      allow create: if isTrustedAgentIdentity()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
         && incoming().createdAt == request.time
@@ -707,7 +741,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isAuthorizedAppUser()
+      allow update: if isTrustedAgentIdentity()
         && isValidId(agentId)
         && isValidAgentProfile(incoming(), agentId)
         && isAgentRecordAuthorized(existing())
@@ -723,7 +757,7 @@ service cloud.firestore {
           ])
         );
 
-      allow delete: if isAuthorizedAppUser()
+      allow delete: if isTrustedAgentIdentity()
         && isValidId(agentId)
         && (isAdmin() || existing().ownerUid == request.auth.uid);
     }
@@ -735,7 +769,7 @@ service cloud.firestore {
       allow get: if isValidId(code);
       allow list: if isAdmin();
 
-      allow create, update: if isAuthorizedAppUser()
+      allow create, update: if isTrustedAgentIdentity()
         && isValidId(code)
         && isValidReferralCodePublic(incoming(), code)
         && incoming().updatedAt == request.time
@@ -763,7 +797,7 @@ service cloud.firestore {
       allow list: if isAuthorizedAppUser()
         && isParentRecordAuthorized(resource.data);
 
-      allow create: if isAuthorizedAppUser()
+      allow create: if isTrustedAgentIdentity()
         && isValidId(parentId)
         && isValidParentProfile(incoming(), parentId)
         && (incoming().ownerUid == request.auth.uid || isAdmin())
@@ -787,9 +821,17 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin()
+          || (
+            isTrustedAgentIdentity()
+            && existing().agentEmail is string
+            && existing().agentEmail == userEmailLower()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'contact', 'email', 'phoneAuthEmail', 'passwordAuthEnabled', 'passcodeHash',
+              'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt'
+            ])
+          )
           || incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'contact', 'email', 'passcodeHash',
-            'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt'
+            'passcodeHash', 'updatedAt'
           ])
         );
 
@@ -874,7 +916,7 @@ service cloud.firestore {
         && (
           (
             isAdmin()
-            && incoming().diff(existing()).affectedKeys().hasOnly(['isHidden', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'grade', 'isHidden', 'updatedAt'])
           )
           ||
           (
@@ -952,14 +994,14 @@ service cloud.firestore {
           resource == null
           || isAdmin()
           || resource.data.ownerUid == request.auth.uid
-          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+          || (isTrustedAgentIdentity() && resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
       allow list: if isAuthorizedAppUser()
         && (
           isAdmin()
           || resource.data.ownerUid == request.auth.uid
-          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+          || (isTrustedAgentIdentity() && resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
       allow create: if isAuthorizedAppUser()
@@ -976,7 +1018,7 @@ service cloud.firestore {
         && (
           isAdmin()
           || existing().ownerUid == request.auth.uid
-          || (existing().agentEmail is string && existing().agentEmail.size() >= 3 && existing().agentEmail == userEmailLower())
+          || (isTrustedAgentIdentity() && existing().agentEmail is string && existing().agentEmail.size() >= 3 && existing().agentEmail == userEmailLower())
         )
         && incoming().id == existing().id
         && incoming().workspaceId == existing().workspaceId
@@ -1002,16 +1044,16 @@ service cloud.firestore {
           resource == null
           || isAdmin()
           || resource.data.ownerUid == request.auth.uid
-          || (resource.data.subscriberEmail is string && resource.data.subscriberEmail.size() >= 3 && resource.data.subscriberEmail == userEmailLower())
-          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+          || (isVerifiedUser() && resource.data.subscriberEmail is string && resource.data.subscriberEmail.size() >= 3 && resource.data.subscriberEmail == userEmailLower())
+          || (isTrustedAgentIdentity() && resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
       allow list: if isAuthorizedAppUser()
         && (
           isAdmin()
           || resource.data.ownerUid == request.auth.uid
-          || (resource.data.subscriberEmail is string && resource.data.subscriberEmail.size() >= 3 && resource.data.subscriberEmail == userEmailLower())
-          || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
+          || (isVerifiedUser() && resource.data.subscriberEmail is string && resource.data.subscriberEmail.size() >= 3 && resource.data.subscriberEmail == userEmailLower())
+          || (isTrustedAgentIdentity() && resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
       allow create: if isAuthorizedAppUser()
@@ -1051,7 +1093,7 @@ service cloud.firestore {
     // Collection 12: /payoutRequests/{payoutId} — Agent UPI Withdrawals
     // -------------------------------------------------------------------------
     match /payoutRequests/{payoutId} {
-      allow get: if isAuthorizedAppUser()
+      allow get: if isTrustedAgentIdentity()
         && isValidId(payoutId)
         && (
           resource == null
@@ -1060,14 +1102,14 @@ service cloud.firestore {
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow list: if isAuthorizedAppUser()
+      allow list: if isTrustedAgentIdentity()
         && (
           isAdmin()
           || resource.data.ownerUid == request.auth.uid
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())
         );
 
-      allow create: if isAuthorizedAppUser()
+      allow create: if isTrustedAgentIdentity()
         && isValidId(payoutId)
         && isValidPayoutRequest(incoming(), payoutId)
         && incoming().status == 'pending'
@@ -1106,7 +1148,7 @@ service cloud.firestore {
     match /vouchers/{voucherId} {
       allow get: if isAuthorizedAppUser() && isValidId(voucherId);
 
-      allow list: if isAuthorizedAppUser()
+      allow list: if isTrustedAgentIdentity()
         && (
           isAdmin()
           || (resource.data.agentEmail is string && resource.data.agentEmail.size() >= 3 && resource.data.agentEmail == userEmailLower())

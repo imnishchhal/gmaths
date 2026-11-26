@@ -25,10 +25,23 @@ export function normalizeEmailLower(raw: string | null | undefined): string {
 
 export const normalizeEmailForMatch = normalizeEmailLower;
 
-export function buildAgentAuthEmail(phone: string): string {
+export type PhoneAuthRole = 'agent' | 'parent';
+
+export function buildPhoneAuthEmail(
+  role: PhoneAuthRole,
+  phone: string
+): string {
   const digits = normalizePhoneDigits(phone);
   if (digits.length < 7) return '';
-  return `agent.${digits}@gmaths.local`;
+  return `${role}.${digits}@gmaths.local`;
+}
+
+export function buildAgentAuthEmail(phone: string): string {
+  return buildPhoneAuthEmail('agent', phone);
+}
+
+export function buildParentAuthEmail(phone: string): string {
+  return buildPhoneAuthEmail('parent', phone);
 }
 
 export function isPhoneAgentAuthEmail(
@@ -36,6 +49,27 @@ export function isPhoneAgentAuthEmail(
 ): boolean {
   const clean = normalizeEmailLower(email);
   return /^agent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
+}
+
+export function isPhoneParentAuthEmail(
+  email: string | null | undefined
+): boolean {
+  const clean = normalizeEmailLower(email);
+  return /^parent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
+}
+
+export function isPhoneAuthEmail(email: string | null | undefined): boolean {
+  return isPhoneAgentAuthEmail(email) || isPhoneParentAuthEmail(email);
+}
+
+export function formatAuthIdentityLabel(
+  email: string | null | undefined
+): string {
+  const clean = normalizeEmailLower(email);
+  if (!clean) return '';
+  const match = /^(?:agent|parent)\.([0-9]{7,15})@gmaths\.local$/.exec(clean);
+  if (match) return match[1];
+  return (email ?? '').trim();
 }
 
 export async function hashContactForAttribution(raw: string): Promise<string> {

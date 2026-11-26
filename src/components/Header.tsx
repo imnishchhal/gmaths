@@ -18,6 +18,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { usePlatform } from '../context/PlatformContext';
 import { AppView } from '../types/math';
 import { PlatformRoute } from '../types/platform';
+import { formatAuthIdentityLabel, isPhoneAuthEmail } from '../utils/referral';
 
 interface HeaderProps {
   route: PlatformRoute;
@@ -236,10 +237,12 @@ export const Header: React.FC<HeaderProps> = ({
                       <div className="space-y-3">
                         <div>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Google Account (Live Firestore Sync)
+                            {isPhoneAuthEmail(user.email)
+                              ? 'Mobile Account (Live Firestore Sync)'
+                              : 'Google Account (Live Firestore Sync)'}
                           </p>
                           <p className="text-xs font-medium text-slate-900 dark:text-white truncate">
-                            {user.email}
+                            {formatAuthIdentityLabel(user.email)}
                           </p>
                         </div>
 
@@ -448,7 +451,7 @@ export const Header: React.FC<HeaderProps> = ({
                   className="w-full min-h-[48px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap"
                 >
                   <LogOut className="w-4 h-4" />
-                  Sign out ({user.email?.split('@')[0]})
+                  Sign out ({formatAuthIdentityLabel(user.email)})
                 </button>
               ) : (
                 isConfigured && (

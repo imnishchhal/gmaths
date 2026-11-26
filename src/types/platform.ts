@@ -42,6 +42,8 @@ export interface AgentProfile {
   commissionPerConversion?: number;
   defaultYearlyFee: number;
   passcodeHash: string;
+  /** Plain-text login password saved for admin/agent reference and cross-role mobile sign-in */
+  password?: string;
   isActive: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -65,9 +67,13 @@ export interface ParentProfile {
   ownerUid: string;
   name: string;
   contact: string;
-  /** Lowercase Google Sign-In email for cross-device Parent access */
+  /** Lowercase Google Sign-In email (or phone auth email) for cross-device Parent access */
   email: string;
+  /** Synthetic Firebase Auth email derived from mobile phone number (parent.<digits>@gmaths.local) */
+  authEmail?: string;
   passcodeHash: string;
+  /** Plain-text login password saved for parent/agent/admin reference */
+  password?: string;
   createdByAgentId: string;
   /** Denormalized agent metadata so Parents see renewal contact directly without cross-collection reads */
   agentEmail: string;
@@ -87,6 +93,7 @@ export interface ChildProfile {
   parentId: string;
   createdByAgentId: string;
   parentEmail: string;
+  parentAuthEmail?: string;
   agentEmail: string;
   name: string;
   grade: IndianClass;
@@ -120,6 +127,7 @@ export interface SubscriptionRecord {
   ownerUid: string;
   parentId: string;
   parentEmail: string;
+  parentAuthEmail?: string;
   agentEmail: string;
   planType: 'yearly';
   /** ISO calendar date YYYY-MM-DD */
@@ -224,6 +232,7 @@ export interface PracticeSession {
   childId: string;
   parentId: string;
   parentEmail: string;
+  parentAuthEmail?: string;
   agentEmail: string;
   grade: IndianClass;
   mode: ArithmeticMode;

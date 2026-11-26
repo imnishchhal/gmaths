@@ -46,6 +46,7 @@ import {
 import {
   buildAgentReferralUrl,
   buildWhatsAppPitchUrl,
+  isPhoneParentAuthEmail,
 } from '../../utils/referral';
 
 type AgentTab = 'portfolio' | 'leads' | 'payouts' | 'onboard';
@@ -103,6 +104,10 @@ export const AgentDashboard: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showSavedAgentPassword, setShowSavedAgentPassword] = useState(false);
+  const [revealedParentPasswords, setRevealedParentPasswords] = useState<
+    Record<string, boolean>
+  >({});
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
 
@@ -395,9 +400,9 @@ export const AgentDashboard: React.FC = () => {
     }
 
     setNotice(
-      `Onboarded ${parentName} (${parentEmail.trim().toLowerCase()}) with ${childRows.length} ${
+      `Onboarded ${parentName.trim()} (Mobile: ${parentContact.trim()}) with ${childRows.length} ${
         childRows.length === 1 ? 'child' : 'children'
-      }. Yearly plan valid through ${formatIsoDate(computedExpiry)}.`
+      }. They can sign in at /parent with Mobile + Password. Yearly plan valid through ${formatIsoDate(computedExpiry)}.`
     );
     setParentName('');
     setParentContact('');
@@ -807,9 +812,42 @@ export const AgentDashboard: React.FC = () => {
                             </span>
                           </div>
                           <p className="text-xs text-slate-600 dark:text-slate-400 break-words">
-                            {parent.contact}
-                            {parent.email ? ` · ${parent.email}` : ''}
+                            Mobile: {parent.contact}
+                            {parent.email && !isPhoneParentAuthEmail(parent.email)
+                              ? ` · ${parent.email}`
+                              : ''}
                           </p>
+                          {parent.password && (
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                              <span>Login Password:</span>
+                              <span className="font-mono font-semibold text-slate-900 dark:text-white">
+                                {revealedParentPasswords[parent.id]
+                                  ? parent.password
+                                  : '••••••••'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRevealedParentPasswords((prev) => ({
+                                    ...prev,
+                                    [parent.id]: !prev[parent.id],
+                                  }))
+                                }
+                                aria-label={
+                                  revealedParentPasswords[parent.id]
+                                    ? 'Hide parent password'
+                                    : 'Show parent password'
+                                }
+                                className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                              >
+                                {revealedParentPasswords[parent.id] ? (
+                                  <EyeOff className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Eye className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         {latestSub && (
@@ -1362,11 +1400,39 @@ export const AgentDashboard: React.FC = () => {
 
             {/* Change Login Password */}
             <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
-              <div className="flex items-center gap-2">
-                <Lock className="w-4 h-4 text-slate-500 shrink-0" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Update Login Password
-                </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Update Login Password
+                  </h3>
+                </div>
+                {agent.password && (
+                  <div className="inline-flex items-center gap-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-2.5 py-1">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Current:
+                    </span>
+                    <span className="font-mono font-semibold text-slate-900 dark:text-white">
+                      {showSavedAgentPassword ? agent.password : '••••••••'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSavedAgentPassword((v) => !v)}
+                      aria-label={
+                        showSavedAgentPassword
+                          ? 'Hide current password'
+                          : 'Show current password'
+                      }
+                      className="p-0.5 text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                    >
+                      {showSavedAgentPassword ? (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {passwordError && (
@@ -1486,10 +1552,11 @@ export const AgentDashboard: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Mobile Number *
+                  Mobile Number (Login ID) *
                 </label>
                 <input
                   type="tel"
+                  inputMode="tel"
                   required
                   value={parentContact}
                   onChange={(e) => setParentContact(e.target.value)}
@@ -1500,36 +1567,35 @@ export const AgentDashboard: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Parent Google Email *
+                  Login Password * (min 6 chars)
                 </label>
                 <input
-                  type="email"
+                  type="text"
                   required
-                  value={parentEmail}
-                  onChange={(e) => setParentEmail(e.target.value)}
-                  placeholder="parent@gmail.com"
+                  minLength={6}
+                  value={parentPasscode}
+                  onChange={(e) => setParentPasscode(e.target.value)}
+                  placeholder="Min 6 characters"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Backup Passcode / PIN *
+                  Parent Google Email (Optional)
                 </label>
                 <input
-                  type="text"
-                  required
-                  value={parentPasscode}
-                  onChange={(e) => setParentPasscode(e.target.value)}
-                  placeholder="e.g. 4820"
+                  type="email"
+                  value={parentEmail}
+                  onChange={(e) => setParentEmail(e.target.value)}
+                  placeholder="Optional (parent@gmail.com)"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Parents sign in with their Google Email on any phone or computer
-              and tap any child card to begin practice — no child passwords
-              needed.
+              Parents sign in at /parent using their Mobile Number and Password
+              (or optional Google Email) and tap any child card to begin practice.
             </p>
           </div>
 

@@ -3,6 +3,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   GoogleAuthProvider,
+  signInWithEmailAndPassword,
   signOut,
   type Auth,
 } from 'firebase/auth';
@@ -96,11 +97,12 @@ export { app, db, auth, googleProvider, firebaseConfig };
 
 /**
  * Creates a Firebase Email/Password auth user in an isolated secondary app instance
- * so an active Admin Google session is never signed out when provisioning an Agent.
+ * so an active Admin or Agent session is never signed out when provisioning an Agent or Parent.
  */
-export async function provisionAgentAuthAccount(
+export async function provisionPhoneAuthAccount(
   authEmail: string,
-  password: string
+  password: string,
+  allowExistingSignInRecovery = false
 ): Promise<string | null> {
   if (!firebaseReady || !hasValidConfig(firebaseConfig)) return null;
   const secondaryApp =
@@ -114,9 +116,35 @@ export async function provisionAgentAuthAccount(
       password
     );
     return credential.user.uid;
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code ?? '')
+        : '';
+    if (allowExistingSignInRecovery && code === 'auth/email-already-in-use') {
+      try {
+        const existingCred = await signInWithEmailAndPassword(
+          secondaryAuth,
+          authEmail,
+          password
+        );
+        return existingCred.user.uid;
+      } catch {
+        // Re-throw original email-already-in-use error if password doesn't match
+        throw err;
+      }
+    }
+    throw err;
   } finally {
     await signOut(secondaryAuth).catch(() => {});
   }
+}
+
+export async function provisionAgentAuthAccount(
+  authEmail: string,
+  password: string
+): Promise<string | null> {
+  return provisionPhoneAuthAccount(authEmail, password, false);
 }
 
 export enum OperationType {

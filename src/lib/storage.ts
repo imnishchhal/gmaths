@@ -31,6 +31,7 @@ import {
   sanitizeId,
   sanitizeSessionPayload,
 } from './firestoreValidation';
+import { formatAuthIdentityLabel } from '../utils/referral';
 
 const LOCAL_SESSIONS_KEY = 'math_speedster_sessions_v1';
 const MAX_LOCAL_SESSIONS = 150;
@@ -140,7 +141,8 @@ export async function ensureUserProfile(user: User): Promise<string> {
   const displayName = sanitizeDisplayName(
     existingSnap.exists()
       ? (existingSnap.data().displayName as string | undefined) ?? user.displayName
-      : user.displayName ?? user.email?.split('@')[0]
+      : user.displayName ??
+          (formatAuthIdentityLabel(user.email) || user.email?.split('@')[0])
   );
   const email = sanitizeEmail(user.email);
 

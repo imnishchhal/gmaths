@@ -41,7 +41,10 @@ import {
   getAgentApprovalStatus,
   isSuspiciousSpeedRun,
 } from '../../types/platform';
-import { isPhoneAgentAuthEmail } from '../../utils/referral';
+import {
+  isPhoneAgentAuthEmail,
+  isPhoneParentAuthEmail,
+} from '../../utils/referral';
 
 type AdminTab = 'agents' | 'subscriptions' | 'payouts' | 'leaderboard';
 type SubFilter = 'all' | ComputedSubscriptionState;
@@ -121,6 +124,9 @@ export const AdminDashboard: React.FC = () => {
   const [subQuery, setSubQuery] = useState('');
   const [overrideNotice, setOverrideNotice] = useState<string | null>(null);
   const [busyParentId, setBusyParentId] = useState<string | null>(null);
+  const [revealedPasswords, setRevealedPasswords] = useState<
+    Record<string, boolean>
+  >({});
 
   // Payouts & Vouchers State
   const [utrByPayoutId, setUtrByPayoutId] = useState<Record<string, string>>({});
@@ -940,11 +946,21 @@ export const AdminDashboard: React.FC = () => {
                 ) : (
                   <div className="space-y-1 sm:col-span-2 lg:col-span-2">
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Password Management
+                      Saved Login Password (leave blank to keep current)
                     </label>
-                    <p className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 text-xs text-slate-600 dark:text-slate-400 flex items-center">
-                      Agents update their own login password inside the Agent Portal under Earnings &amp; Payouts → Settings.
-                    </p>
+                    <input
+                      type="text"
+                      minLength={6}
+                      value={agentForm.passcode}
+                      onChange={(e) =>
+                        setAgentForm((f) => ({ ...f, passcode: e.target.value }))
+                      }
+                      placeholder={`Current: ${
+                        agents.find((a) => a.id === editingAgentId)?.password ||
+                        'Not recorded'
+                      } — enter min 6 chars to update`}
+                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
                   </div>
                 )}
               </div>
@@ -1094,6 +1110,37 @@ export const AdminDashboard: React.FC = () => {
                                 }UPI: ${agent.upiId}`
                               : ''}
                           </p>
+                        )}
+                        {agent.password && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <span>Password:</span>
+                            <span className="font-mono font-semibold text-slate-900 dark:text-white">
+                              {revealedPasswords[`ag_${agent.id}`]
+                                ? agent.password
+                                : '••••••••'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRevealedPasswords((prev) => ({
+                                  ...prev,
+                                  [`ag_${agent.id}`]: !prev[`ag_${agent.id}`],
+                                }))
+                              }
+                              aria-label={
+                                revealedPasswords[`ag_${agent.id}`]
+                                  ? 'Hide agent password'
+                                  : 'Show agent password'
+                              }
+                              className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                            >
+                              {revealedPasswords[`ag_${agent.id}`] ? (
+                                <EyeOff className="w-3.5 h-3.5" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                         )}
                       </div>
 
@@ -1298,11 +1345,48 @@ export const AdminDashboard: React.FC = () => {
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 dark:text-slate-400 break-words">
-                          {row.parent.contact} · Agent:{' '}
+                          {row.parent.contact}
+                          {row.parent.email &&
+                          !isPhoneParentAuthEmail(row.parent.email)
+                            ? ` · ${row.parent.email}`
+                            : ''}{' '}
+                          · Agent:{' '}
                           <span className="font-medium text-slate-800 dark:text-slate-200">
                             {row.agent ? `${row.agent.name} (${row.agent.agentCode})` : 'Unassigned'}
                           </span>
                         </p>
+                        {row.parent.password && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <span>Parent Password:</span>
+                            <span className="font-mono font-semibold text-slate-900 dark:text-white">
+                              {revealedPasswords[`par_${row.parent.id}`]
+                                ? row.parent.password
+                                : '••••••••'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRevealedPasswords((prev) => ({
+                                  ...prev,
+                                  [`par_${row.parent.id}`]:
+                                    !prev[`par_${row.parent.id}`],
+                                }))
+                              }
+                              aria-label={
+                                revealedPasswords[`par_${row.parent.id}`]
+                                  ? 'Hide parent password'
+                                  : 'Show parent password'
+                              }
+                              className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                            >
+                              {revealedPasswords[`par_${row.parent.id}`] ? (
+                                <EyeOff className="w-3.5 h-3.5" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-left sm:text-right font-mono tabular-nums shrink-0">

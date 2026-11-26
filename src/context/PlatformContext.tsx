@@ -7,7 +7,10 @@ import React, {
   useState,
 } from 'react';
 import { formatPhoneAuthError, useFirebase } from './FirebaseContext';
-import { provisionAgentAuthAccount } from '../lib/firebase';
+import {
+  provisionAgentAuthAccount,
+  provisionPhoneAuthAccount,
+} from '../lib/firebase';
 import {
   cloudCreateAgent,
   cloudCreateChild,
@@ -22,11 +25,12 @@ import {
   cloudMarkPayoutPaid,
   cloudSaveAppConfig,
   cloudUpdateAgent,
-  cloudUpdateAgentPasswordHash,
+  cloudUpdateAgentPassword,
   cloudUpdateAgentSelfProfile,
   cloudUpdateChildLeaderboardVisibility,
   cloudUpdateChildScoreAndLeaderboard,
   cloudUpdateLeadStatus,
+  cloudUpdateParentPassword,
   cloudUpdateSubscription,
   lookupReferralCodeCloud,
   resolveUserRoleFromFirestore,
@@ -89,9 +93,12 @@ import {
 import { hashSecret, verifySecret } from '../utils/crypto';
 import {
   buildAgentAuthEmail,
+  buildParentAuthEmail,
   captureReferralFromCurrentUrl,
   hashContactForAttribution,
   isPhoneAgentAuthEmail,
+  isPhoneAuthEmail,
+  isPhoneParentAuthEmail,
   loadStickyReferral,
   normalizeEmailForMatch,
   normalizePhoneDigits,
@@ -239,7 +246,7 @@ interface PlatformContextValue {
     phone?: string
   ) => Promise<void>;
 
-  // Role Authentication (Phone+Password for Agents, Google for Admin/Parent)
+  // Role Authentication (Mobile+Password for Agents & Parents, Google for Admin/Optional)
   signInAndRouteWithGoogle: () => Promise<{ ok: boolean; error?: string }>;
   signInWithGoogleRedirectFlow: () => Promise<void>;
   loginAgentPhonePassword: (
@@ -249,6 +256,10 @@ interface PlatformContextValue {
   loginAgentPasscode: (
     identifier: string,
     passcode: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  loginParentPhonePassword: (
+    phone: string,
+    password: string
   ) => Promise<{ ok: boolean; error?: string }>;
   loginParentPasscode: (
     contact: string,
@@ -268,6 +279,10 @@ interface PlatformContextValue {
   ) => Promise<{ ok: boolean; error?: string }>;
   changeAgentPassword: (
     agentId: string,
+    newPassword: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  changeParentPassword: (
+    parentId: string,
     newPassword: string
   ) => Promise<{ ok: boolean; error?: string }>;
   requestAgentPayout: (
@@ -1231,7 +1246,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   const recordTrialLeadIfReferred = useCallback(
     async (name: string, email: string, phone = '') => {
       if (!capturedReferralCode || !user) return;
-      if (isPhoneAgentAuthEmail(user.email)) return;
+      if (isPhoneAuthEmail(user.email)) return;
       const emailLower = normalizeEmailForMatch(email || user.email || '');
       if (!emailLower) return;
 
@@ -1410,6 +1425,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           commissionPerConversion: 0,
           defaultYearlyFee: ANNUAL_PLAN_PRICE_INR,
           passcodeHash,
+          password,
           isActive: false,
           createdAtMs: now,
           updatedAtMs: now,
@@ -1429,7 +1445,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const signupOutcome = await signUpWithPhoneCredentials(
         phoneDigits,
         password,
-        nameClean
+        nameClean,
+        'agent'
       );
       if (!signupOutcome.user) {
         return {
@@ -1456,6 +1473,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         commissionPerConversion: 0,
         defaultYearlyFee: ANNUAL_PLAN_PRICE_INR,
         passcodeHash,
+        password,
         isActive: false,
         createdAtMs: now,
         updatedAtMs: now,
@@ -1537,7 +1555,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
 
-      if (isConfigured) {
+      if (isConfigured && user && isPhoneAgentAuthEmail(user.email)) {
         const authRes = await changeCurrentPassword(newPassword);
         if (!authRes.ok) {
           return {
@@ -1552,7 +1570,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         const local = loadLocalGrowthState();
         local.agents = local.agents.map((a) =>
           a.id === agentId
-            ? { ...a, passcodeHash: nextHash, updatedAtMs: Date.now() }
+            ? {
+                ...a,
+                password: newPassword,
+                passcodeHash: nextHash,
+                updatedAtMs: Date.now(),
+              }
             : a
         );
         saveLocalGrowthState(local);
@@ -1561,7 +1584,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       try {
-        await cloudUpdateAgentPasswordHash(agentId, nextHash);
+        await cloudUpdateAgentPassword(agentId, newPassword, nextHash);
         return { ok: true };
       } catch (err) {
         return {
@@ -1570,7 +1593,58 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
     },
-    [agents, changeCurrentPassword, isConfigured]
+    [agents, changeCurrentPassword, isConfigured, user]
+  );
+
+  const changeParentPassword = useCallback(
+    async (parentId: string, newPassword: string) => {
+      const target = parents.find((p) => p.id === parentId);
+      if (!target) return { ok: false, error: 'Parent profile not found.' };
+      if (newPassword.length < 6) {
+        return {
+          ok: false,
+          error: 'New password must be at least 6 characters long.',
+        };
+      }
+
+      if (isConfigured && user && isPhoneParentAuthEmail(user.email)) {
+        const authRes = await changeCurrentPassword(newPassword);
+        if (!authRes.ok) {
+          return {
+            ok: false,
+            error: authRes.error || 'Could not update login password.',
+          };
+        }
+      }
+
+      const nextHash = await hashSecret(newPassword);
+      if (!isConfigured) {
+        setParents((prev) =>
+          prev.map((p) =>
+            p.id === parentId
+              ? {
+                  ...p,
+                  password: newPassword,
+                  passcodeHash: nextHash,
+                  updatedAtMs: Date.now(),
+                }
+              : p
+          )
+        );
+        return { ok: true };
+      }
+
+      try {
+        await cloudUpdateParentPassword(parentId, newPassword, nextHash);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [changeCurrentPassword, isConfigured, parents, user]
   );
 
   const requestAgentPayout = useCallback(
@@ -1675,7 +1749,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             error: 'This Agent account has been suspended by Admin.',
           };
         }
-        const valid = await verifySecret(password, match.passcodeHash);
+        const valid =
+          (typeof match.password === 'string' && match.password === password) ||
+          (await verifySecret(password, match.passcodeHash));
         if (!valid) {
           return { ok: false, error: 'Incorrect phone number or password.' };
         }
@@ -1687,7 +1763,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         return { ok: true };
       }
 
-      const authOutcome = await signInWithPhoneCredentials(phoneDigits, password);
+      const authOutcome = await signInWithPhoneCredentials(
+        phoneDigits,
+        password,
+        'agent'
+      );
       if (authOutcome.user) {
         const resolved = await resolveUserRoleFromFirestore(authOutcome.user);
         if (resolved.inactiveAgent) {
@@ -1722,7 +1802,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
               error: 'This Agent account has been suspended by Admin.',
             };
           }
-          const valid = await verifySecret(password, legacyMatch.passcodeHash);
+          const valid =
+            (typeof legacyMatch.password === 'string' &&
+              legacyMatch.password === password) ||
+            (await verifySecret(password, legacyMatch.passcodeHash));
           if (valid) {
             updateRoleSession({
               role: 'agent',
@@ -1778,7 +1861,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'This Agent account has been suspended by Admin.',
         };
       }
-      const valid = await verifySecret(passcode, match.passcodeHash);
+      const valid =
+        (typeof match.password === 'string' && match.password === passcode) ||
+        (await verifySecret(passcode, match.passcodeHash));
       if (!valid) {
         return { ok: false, error: 'Incorrect Agent password.' };
       }
@@ -1792,37 +1877,122 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     [agents, loginAgentPhonePassword, updateRoleSession, user]
   );
 
-  const loginParentPasscode = useCallback(
-    async (contact: string, passcode: string) => {
-      if (!user) {
+  const loginParentPhonePassword = useCallback(
+    async (phone: string, password: string) => {
+      const phoneDigits = normalizePhoneDigits(phone);
+      if (phoneDigits.length < 7 || !password) {
+        return {
+          ok: false,
+          error: 'Enter your registered mobile number and password.',
+        };
+      }
+
+      if (!isConfigured) {
+        const match = parents.find(
+          (p) => normalizePhoneDigits(p.contact) === phoneDigits
+        );
+        if (!match) {
+          return {
+            ok: false,
+            error: 'No Parent account found for this mobile number.',
+          };
+        }
+        const valid =
+          (typeof match.password === 'string' && match.password === password) ||
+          (await verifySecret(password, match.passcodeHash));
+        if (!valid) {
+          return { ok: false, error: 'Incorrect mobile number or password.' };
+        }
+        updateRoleSession({
+          role: 'parent',
+          accountId: match.id,
+          displayName: match.name,
+        });
+        return { ok: true };
+      }
+
+      const authOutcome = await signInWithPhoneCredentials(
+        phoneDigits,
+        password,
+        'parent'
+      );
+      if (authOutcome.user) {
+        const resolved = await resolveUserRoleFromFirestore(authOutcome.user);
+        if (resolved.session && resolved.session.role === 'parent') {
+          updateRoleSession(resolved.session);
+          return { ok: true };
+        }
         return {
           ok: false,
           error:
-            'Sign in with Google first to load your Cloud Firestore family account.',
+            'Login verified, but your Parent workspace record was not found. Ask your Agent to check your family account.',
         };
       }
+
+      // Legacy fallback when already signed in to Firebase and parent doc uses Gmail/contact match
+      if (user) {
+        const legacyMatch = parents.find(
+          (p) => normalizePhoneDigits(p.contact) === phoneDigits
+        );
+        if (legacyMatch) {
+          const valid =
+            (typeof legacyMatch.password === 'string' &&
+              legacyMatch.password === password) ||
+            (await verifySecret(password, legacyMatch.passcodeHash));
+          if (valid) {
+            updateRoleSession({
+              role: 'parent',
+              accountId: legacyMatch.id,
+              displayName: legacyMatch.name,
+            });
+            return { ok: true };
+          }
+        }
+      }
+
+      return {
+        ok: false,
+        error: authOutcome.error || 'Incorrect mobile number or password.',
+      };
+    },
+    [
+      isConfigured,
+      parents,
+      signInWithPhoneCredentials,
+      updateRoleSession,
+      user,
+    ]
+  );
+
+  const loginParentPasscode = useCallback(
+    async (contact: string, passcode: string) => {
+      if (!user) {
+        return loginParentPhonePassword(contact, passcode);
+      }
       const target = contact.trim().toLowerCase();
+      const targetDigits = normalizePhoneDigits(contact);
       if (!target || !passcode.trim()) {
         return {
           ok: false,
-          error: 'Enter your registered mobile or email and passcode.',
+          error: 'Enter your registered mobile or email and password.',
         };
       }
       const match = parents.find(
         (p) =>
           p.contact.trim().toLowerCase() === target ||
-          p.email.trim().toLowerCase() === target
+          (targetDigits.length >= 7 &&
+            normalizePhoneDigits(p.contact) === targetDigits) ||
+          p.email.trim().toLowerCase() === target ||
+          (p.authEmail && p.authEmail.trim().toLowerCase() === target)
       );
       if (!match) {
-        return {
-          ok: false,
-          error:
-            'Parent account not found in your synced workspace. Sign in with the Google email linked by your Agent.',
-        };
+        return loginParentPhonePassword(contact, passcode);
       }
-      const valid = await verifySecret(passcode, match.passcodeHash);
+      const valid =
+        (typeof match.password === 'string' && match.password === passcode) ||
+        (await verifySecret(passcode, match.passcodeHash));
       if (!valid) {
-        return { ok: false, error: 'Incorrect Parent passcode.' };
+        return { ok: false, error: 'Incorrect Parent password.' };
       }
       updateRoleSession({
         role: 'parent',
@@ -1831,7 +2001,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       return { ok: true };
     },
-    [parents, updateRoleSession, user]
+    [loginParentPhonePassword, parents, updateRoleSession, user]
   );
 
   const switchToChildMode = useCallback(
@@ -1975,6 +2145,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         ),
         defaultYearlyFee: Math.max(0, Number(input.defaultYearlyFee) || 0),
         passcodeHash,
+        password: passwordClean,
         isActive: true,
         createdAtMs: now,
         updatedAtMs: now,
@@ -2028,9 +2199,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
 
-      const passcodeHash = updates.newPasscode?.trim()
-        ? await hashSecret(updates.newPasscode)
+      const trimmedNewPass = updates.newPasscode?.trim() ?? '';
+      if (trimmedNewPass && trimmedNewPass.length < 6) {
+        return {
+          ok: false,
+          error: 'New password must be at least 6 characters long.',
+        };
+      }
+
+      const passcodeHash = trimmedNewPass
+        ? await hashSecret(trimmedNewPass)
         : existing.passcodeHash;
+      const plainPassword = trimmedNewPass || existing.password;
 
       const nextStatus: AgentApprovalStatus =
         updates.approvalStatus ??
@@ -2056,6 +2236,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             : existing.commissionPerConversion ?? 0,
         defaultYearlyFee: Math.max(0, Number(updates.defaultYearlyFee) || 0),
         passcodeHash,
+        ...(typeof plainPassword === 'string' && plainPassword.length > 0
+          ? { password: plainPassword }
+          : {}),
         isActive: nextStatus === 'approved' && updates.isActive,
         updatedAtMs: Date.now(),
       };
@@ -2367,34 +2550,45 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
 
-      const contactClean = input.parentContact.trim();
-      const emailClean = input.parentEmail.trim().toLowerCase();
-      if (!input.parentName.trim() || !contactClean || !input.parentPasscode.trim()) {
+      const contactDigits = normalizePhoneDigits(input.parentContact);
+      const contactClean = contactDigits || input.parentContact.trim();
+      const rawEmailClean = input.parentEmail.trim().toLowerCase();
+      const passwordClean = input.parentPasscode.trim();
+      if (!input.parentName.trim() || contactDigits.length < 7) {
         return {
           ok: false,
-          error: 'Parent Name, Mobile Number, and Passcode are required.',
+          error: 'Parent Name and a valid Mobile Number (at least 7 digits) are required.',
         };
       }
-      if (!emailClean || !emailClean.includes('@')) {
+      if (passwordClean.length < 6) {
         return {
           ok: false,
-          error:
-            'Enter the Parent Google Email so they can sign in on any mobile or desktop device.',
+          error: 'Parent Password must be at least 6 characters long.',
+        };
+      }
+      if (rawEmailClean && !rawEmailClean.includes('@')) {
+        return {
+          ok: false,
+          error: 'Enter a valid Google Email or leave it blank to use Mobile + Password login.',
         };
       }
       if (input.children.length === 0) {
         return { ok: false, error: 'Add at least one Child profile.' };
       }
 
+      const parentAuthEmail = buildParentAuthEmail(contactDigits);
+      const emailClean = rawEmailClean || parentAuthEmail;
+
       const existingParent = parents.some(
         (p) =>
-          p.contact.trim().toLowerCase() === contactClean.toLowerCase() ||
-          (p.email && p.email.toLowerCase() === emailClean)
+          normalizePhoneDigits(p.contact) === contactDigits ||
+          (rawEmailClean && p.email.toLowerCase() === rawEmailClean) ||
+          (p.authEmail && p.authEmail.toLowerCase() === parentAuthEmail)
       );
       if (existingParent) {
         return {
           ok: false,
-          error: 'A Parent account with this mobile or email already exists.',
+          error: 'A Parent account with this mobile number or email already exists.',
         };
       }
 
@@ -2407,9 +2601,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
+      try {
+        await provisionPhoneAuthAccount(parentAuthEmail, passwordClean, true);
+      } catch (authErr) {
+        const formatted = formatPhoneAuthError(authErr, 'parent');
+        return {
+          ok: false,
+          error: formatted.message,
+        };
+      }
+
       const now = Date.now();
       const parentId = makeId('par');
-      const parentHash = await hashSecret(input.parentPasscode);
+      const parentHash = await hashSecret(passwordClean);
 
       const newParent: ParentProfile = {
         id: parentId,
@@ -2418,7 +2622,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         name: input.parentName.trim(),
         contact: contactClean,
         email: emailClean,
+        authEmail: parentAuthEmail,
         passcodeHash: parentHash,
+        password: passwordClean,
         createdByAgentId: agent.id,
         agentEmail: agent.email,
         agentName: agent.name,
@@ -2436,6 +2642,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         parentId,
         createdByAgentId: agent.id,
         parentEmail: emailClean,
+        parentAuthEmail,
         agentEmail: agent.email,
         name: ch.name.trim(),
         grade: normalizeIndianClass(ch.grade),
@@ -2453,6 +2660,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         ownerUid: user.uid,
         parentId,
         parentEmail: emailClean,
+        parentAuthEmail,
         agentEmail: agent.email,
         planType: 'yearly',
         startDate,
@@ -2488,7 +2696,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!user || !isConfigured) {
         return {
           ok: false,
-          error: 'Sign in with Google to add a child profile.',
+          error: 'Sign in first to add a child profile.',
         };
       }
       if (!ch.name.trim()) {
@@ -2508,6 +2716,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         parentId,
         createdByAgentId: agentId,
         parentEmail: parent.email,
+        parentAuthEmail:
+          parent.authEmail || buildParentAuthEmail(parent.contact) || undefined,
         agentEmail: agent?.email ?? parent.agentEmail,
         name: ch.name.trim(),
         grade: normalizeIndianClass(ch.grade),
@@ -2543,7 +2753,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!user || !isConfigured) {
         return {
           ok: false,
-          error: 'Sign in with Google to record a renewal.',
+          error: 'Sign in first to record a renewal.',
         };
       }
       const parent = parents.find((p) => p.id === input.parentId);
@@ -2560,6 +2770,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         ownerUid: user.uid,
         parentId: input.parentId,
         parentEmail: parent.email,
+        parentAuthEmail:
+          parent.authEmail || buildParentAuthEmail(parent.contact) || undefined,
         agentEmail: agent?.email ?? parent.agentEmail,
         planType: 'yearly',
         startDate,
@@ -2629,6 +2841,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         weakTopic = session.mode;
       }
 
+      const matchedParent = parents.find((p) => p.id === child.parentId);
       const practiceDoc: PracticeSession = {
         id: makeId('ps'),
         workspaceId: WORKSPACE_ID,
@@ -2636,6 +2849,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         childId: child.id,
         parentId: child.parentId,
         parentEmail: child.parentEmail,
+        parentAuthEmail:
+          child.parentAuthEmail ||
+          matchedParent?.authEmail ||
+          (matchedParent ? buildParentAuthEmail(matchedParent.contact) : '') ||
+          undefined,
         agentEmail: child.agentEmail,
         grade: normalizeIndianClass(session.grade ?? child.grade),
         mode: session.mode,
@@ -2675,7 +2893,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         return false;
       }
     },
-    [children, isConfigured, user]
+    [children, isConfigured, parents, user]
   );
 
   const dismissPlatformError = useCallback(() => setPlatformError(null), []);
@@ -2728,10 +2946,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogleRedirectFlow,
       loginAgentPhonePassword,
       loginAgentPasscode,
+      loginParentPhonePassword,
       loginParentPasscode,
       registerSalesAgent,
       updateAgentSelfProfile,
       changeAgentPassword,
+      changeParentPassword,
       requestAgentPayout,
       switchToChildMode,
       exitChildModeToParent,
@@ -2801,10 +3021,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogleRedirectFlow,
       loginAgentPhonePassword,
       loginAgentPasscode,
+      loginParentPhonePassword,
       loginParentPasscode,
       registerSalesAgent,
       updateAgentSelfProfile,
       changeAgentPassword,
+      changeParentPassword,
       requestAgentPayout,
       switchToChildMode,
       exitChildModeToParent,

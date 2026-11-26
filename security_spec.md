@@ -2,11 +2,11 @@
 
 ## 1. Data Invariants
 1. **Default-Deny Catch-All**: No unmatched collection or path is readable or writable.
-2. **Verified Email Identity**: All writes across `/users`, `/agents`, `/referralCodes`, `/parents`, `/children`, `/childLeaderboard`, `/subscriptions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`, and `/practiceSessions` require `request.auth != null && request.auth.token.email_verified == true`.
+2. **Authenticated Identity**: Writes across `/users`, `/agents`, `/referralCodes`, `/parents`, `/children`, `/childLeaderboard`, `/subscriptions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`, and `/practiceSessions` require either a verified Google identity (`email_verified == true`) OR synthetic Firebase Password auth for field Agents (`^agent\.[0-9]{7,15}@gmaths\.local$`) or Parents (`^parent\.[0-9]{7,15}@gmaths\.local$`).
 3. **Cross-Device Role Isolation Without `get()` in `list` Queries**:
-   - **Admin** (`kumarnishchhal175@gmail.com` verified or `/admins/{uid}`): full workspace access (`workspaceId == 'gmaths_main'`).
+   - **Admin** (`kumarnishchhal175@gmail.com` verified or `/admins/{uid}`): full workspace access (`workspaceId == 'gmaths_main'`). Admin privilege strictly requires `email_verified == true`.
    - **Agent**: scoped via `resource.data.email == request.auth.token.email` (on `/agents`) and `resource.data.agentEmail == request.auth.token.email` (on `/parents`, `/children`, `/subscriptions`, `/practiceSessions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`).
-   - **Parent**: scoped via `resource.data.email == request.auth.token.email` (on `/parents`) and `resource.data.parentEmail == request.auth.token.email` (on `/children`, `/subscriptions`, `/practiceSessions`).
+   - **Parent**: scoped via `resource.data.email == request.auth.token.email || resource.data.authEmail == request.auth.token.email` (on `/parents`) and `resource.data.parentEmail == request.auth.token.email || resource.data.parentAuthEmail == request.auth.token.email` (on `/children`, `/subscriptions`, `/practiceSessions`).
    - **Student Subscriber**: scoped via `ownerUid == request.auth.uid` or `subscriberEmail == request.auth.token.email` (on `/studentSubscriptions`).
 4. **Zero-PII Public Referral Lookup (`/referralCodes/{code}`)**: Public single-doc `get` (no `list`) exposes only `{ code, workspaceId, agentId, agentName, isActive, approvalStatus, emailHash, phoneHash, updatedAt }` without leaking agent emails, phone numbers, or UPI IDs.
 5. **Agent Approval & Payout Guardrails**:

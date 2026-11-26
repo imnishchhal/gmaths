@@ -75,6 +75,7 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       commissionPerConversion: 300,
       defaultYearlyFee: 1200,
       passcodeHash: 'x'.repeat(64),
+      password: 'agentpass123',
       isActive: true,
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
@@ -98,6 +99,25 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
     },
+    par_phone: {
+      id: 'par_phone',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'phone_ag_uid',
+      name: 'Phone Parent',
+      contact: '9811223344',
+      email: 'parent.9811223344@gmaths.local',
+      authEmail: 'parent.9811223344@gmaths.local',
+      passcodeHash: 'y'.repeat(64),
+      password: 'parentpass123',
+      createdByAgentId: 'ag_phone',
+      agentEmail: 'agent.9876501234@gmaths.local',
+      agentName: 'Phone Agent',
+      agentPhone: '9876501234',
+      agentArea: 'Jaipur',
+      agentCode: 'PH01',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
   },
   children: {
     ch_1: {
@@ -113,6 +133,23 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       totalScore: 42,
       sessionsCount: 3,
       bestStreak: 11,
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
+    ch_phone: {
+      id: 'ch_phone',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'phone_ag_uid',
+      parentId: 'par_phone',
+      createdByAgentId: 'ag_phone',
+      parentEmail: 'parent.9811223344@gmaths.local',
+      parentAuthEmail: 'parent.9811223344@gmaths.local',
+      agentEmail: 'agent.9876501234@gmaths.local',
+      name: 'Meera',
+      grade: '2nd',
+      totalScore: 25,
+      sessionsCount: 2,
+      bestStreak: 6,
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
     },
@@ -269,8 +306,14 @@ const isPhoneAgentAuth = (auth: AuthContext) =>
       /^agent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
       auth.sign_in_provider === 'password'
   );
+const isPhoneParentAuth = (auth: AuthContext) =>
+  Boolean(
+    auth &&
+      /^parent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
+      auth.sign_in_provider === 'password'
+  );
 const isAuthorizedAppUser = (auth: AuthContext) =>
-  isVerified(auth) || isPhoneAgentAuth(auth);
+  isVerified(auth) || isPhoneAgentAuth(auth) || isPhoneParentAuth(auth);
 const isBootstrappedAdmin = (auth: AuthContext) =>
   isVerified(auth) && auth!.email.toLowerCase() === BOOTSTRAPPED_ADMIN;
 const isValidId = (id: unknown) =>
@@ -300,6 +343,18 @@ function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): bo
   );
 }
 
+function isParentRecordAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
+  if (!isAuthorizedAppUser(auth)) return false;
+  const email = auth!.email.toLowerCase();
+  return (
+    data.ownerUid === auth!.uid ||
+    (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
+    (typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
+    (typeof data.email === 'string' && data.email.length >= 3 && data.email === email) ||
+    (typeof data.authEmail === 'string' && data.authEmail.length >= 3 && data.authEmail === email)
+  );
+}
+
 function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
   if (!isAuthorizedAppUser(auth)) return false;
   const email = auth!.email.toLowerCase();
@@ -307,7 +362,8 @@ function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknow
     data.ownerUid === auth!.uid ||
     (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
     (typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
-    (typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email)
+    (typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email) ||
+    (typeof data.parentAuthEmail === 'string' && data.parentAuthEmail.length >= 3 && data.parentAuthEmail === email)
   );
 }
 
@@ -338,7 +394,7 @@ function evaluateRule(
       ];
       const allowed = [
         ...req,
-        'city', 'upiId', 'approvalStatus', 'commissionPerConversion',
+        'city', 'upiId', 'approvalStatus', 'commissionPerConversion', 'password',
       ];
       const validBase =
         isAuthorizedAppUser(auth) &&
@@ -347,6 +403,7 @@ function evaluateRule(
         incoming.id === docId &&
         typeof incoming.email === 'string' &&
         incoming.email.length >= 3 &&
+        (!('password' in incoming) || (typeof incoming.password === 'string' && incoming.password.length <= 128)) &&
         incoming.createdAt === SERVER_TIME &&
         incoming.updatedAt === SERVER_TIME;
 
@@ -367,37 +424,60 @@ function evaluateRule(
     if (op === 'get') {
       if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!existing) return 'ALLOW';
-      const email = auth!.email.toLowerCase();
-      const ok =
-        existing.ownerUid === auth!.uid ||
-        (isBootstrappedAdmin(auth) && existing.workspaceId === 'gmaths_main') ||
-        existing.agentEmail === email ||
-        existing.email === email;
-      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+      return isParentRecordAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
     }
     if (op === 'create' && incoming) {
+      const req = [
+        'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'email', 'passcodeHash',
+        'createdByAgentId', 'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode',
+        'createdAt', 'updatedAt',
+      ];
+      const allowed = [...req, 'authEmail', 'password'];
       const agentId = String(incoming.createdByAgentId ?? '');
-      const ok = isAuthorizedAppUser(auth) && isValidId(docId) && Boolean(dbState.agents[agentId]);
+      const ok =
+        isAuthorizedAppUser(auth) &&
+        isValidId(docId) &&
+        hasAllowedKeys(incoming, req, allowed) &&
+        (!('password' in incoming) || (typeof incoming.password === 'string' && incoming.password.length <= 128)) &&
+        Boolean(dbState.agents[agentId]);
       return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'update' && incoming && existing) {
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!isParentRecordAuthorized(auth, existing)) return 'PERMISSION_DENIED';
+      const diffKeys = Object.keys(incoming).filter((k) => incoming[k] !== existing[k]);
+      const allowedDiff = [
+        'name', 'contact', 'email', 'authEmail', 'passcodeHash', 'password',
+        'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt',
+      ];
+      return diffKeys.every((k) => allowedDiff.includes(k)) ? 'ALLOW' : 'PERMISSION_DENIED';
     }
   }
 
-  if (col === 'children' && op === 'create' && incoming) {
-    const req = [
-      'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
-      'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
-      'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt',
-    ];
-    const parentId = String(incoming.parentId ?? '');
-    const ok =
-      isVerified(auth) &&
-      isValidId(docId) &&
-      hasAllowedKeys(incoming, req, req) &&
-      INDIAN_CLASSES.has(String(incoming.grade)) &&
-      Boolean(dbState.parents[parentId]) &&
-      incoming.createdAt === SERVER_TIME &&
-      incoming.updatedAt === SERVER_TIME;
-    return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+  if (col === 'children') {
+    if (op === 'get') {
+      if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
+      if (!existing) return 'ALLOW';
+      return isFamilyScopedAuthorized(auth, existing) ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'create' && incoming) {
+      const req = [
+        'id', 'workspaceId', 'ownerUid', 'parentId', 'createdByAgentId',
+        'parentEmail', 'agentEmail', 'name', 'grade', 'totalScore',
+        'sessionsCount', 'bestStreak', 'createdAt', 'updatedAt',
+      ];
+      const allowed = [...req, 'parentAuthEmail'];
+      const parentId = String(incoming.parentId ?? '');
+      const ok =
+        isAuthorizedAppUser(auth) &&
+        isValidId(docId) &&
+        hasAllowedKeys(incoming, req, allowed) &&
+        INDIAN_CLASSES.has(String(incoming.grade)) &&
+        Boolean(dbState.parents[parentId]) &&
+        incoming.createdAt === SERVER_TIME &&
+        incoming.updatedAt === SERVER_TIME;
+      return ok ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
   }
 
   if (col === 'childLeaderboard') {
@@ -898,12 +978,84 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
           ownerUid: 'new_phone_uid',
           email: 'agent.9988776655@gmaths.local',
           phone: '9988776655',
+          password: 'secretpassword',
           approvalStatus: 'pending',
           isActive: false,
           commissionRate: 0,
           commissionPerConversion: 0,
         }
       ),
+  },
+  {
+    name: 'DD-23 Phone+Password Parent Cannot Read Another Parent Family',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'phone_par_uid', email: 'parent.9811223344@gmaths.local', email_verified: false, sign_in_provider: 'password' },
+        'parents',
+        'get',
+        'par_1'
+      ),
+  },
+  {
+    name: 'DD-24 Phone+Password Parent Cannot Assume Admin Privilege',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'phone_par_uid', email: 'parent.9811223344@gmaths.local', email_verified: false, sign_in_provider: 'password' },
+        'vouchers',
+        'create',
+        'GM_SPOOF1',
+        { ...dbState.vouchers.GMATHS_UNUSED01, id: 'GM_SPOOF1', code: 'GM_SPOOF1' }
+      ),
+  },
+  {
+    name: 'VALID-10 Phone+Password Parent Reads Own Profile & Linked Child',
+    expected: 'ALLOW',
+    run: () => {
+      const auth = {
+        uid: 'phone_par_uid',
+        email: 'parent.9811223344@gmaths.local',
+        email_verified: false,
+        sign_in_provider: 'password' as const,
+      };
+      const parentRead = evaluateRule(auth, 'parents', 'get', 'par_phone');
+      const childRead = evaluateRule(auth, 'children', 'get', 'ch_phone');
+      return parentRead === 'ALLOW' && childRead === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
+    },
+  },
+  {
+    name: 'VALID-11 Phone+Password Parent Updates Own Password & Agent Creates Parent With Password',
+    expected: 'ALLOW',
+    run: () => {
+      const parAuth = {
+        uid: 'phone_par_uid',
+        email: 'parent.9811223344@gmaths.local',
+        email_verified: false,
+        sign_in_provider: 'password' as const,
+      };
+      const agAuth = {
+        uid: 'phone_ag_uid',
+        email: 'agent.9876501234@gmaths.local',
+        email_verified: false,
+        sign_in_provider: 'password' as const,
+      };
+      const parUpdate = evaluateRule(parAuth, 'parents', 'update', 'par_phone', {
+        ...dbState.parents.par_phone,
+        password: 'newparentpass99',
+        passcodeHash: 'z'.repeat(64),
+        updatedAt: SERVER_TIME + 1,
+      });
+      const agCreatePar = evaluateRule(agAuth, 'parents', 'create', 'par_new2', {
+        ...dbState.parents.par_phone,
+        id: 'par_new2',
+        contact: '9000011111',
+        email: 'parent.9000011111@gmaths.local',
+        authEmail: 'parent.9000011111@gmaths.local',
+        password: 'initialpass123',
+      });
+      return parUpdate === 'ALLOW' && agCreatePar === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
+    },
   },
 ];
 

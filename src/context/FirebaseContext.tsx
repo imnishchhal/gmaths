@@ -18,7 +18,11 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import { buildAgentAuthEmail } from '../utils/referral';
+import {
+  buildPhoneAuthEmail,
+  formatAuthIdentityLabel,
+  type PhoneAuthRole,
+} from '../utils/referral';
 import {
   auth,
   googleProvider,
@@ -95,10 +99,14 @@ function shouldFallbackToRedirect(err: unknown): boolean {
   );
 }
 
-export function formatPhoneAuthError(err: unknown): {
+export function formatPhoneAuthError(
+  err: unknown,
+  role: PhoneAuthRole = 'agent'
+): {
   code: string;
   message: string;
 } {
+  const roleLabel = role === 'parent' ? 'Parent' : 'Agent';
   const code = extractAuthErrorCode(err);
   if (
     code === 'auth/invalid-credential' ||
@@ -107,14 +115,13 @@ export function formatPhoneAuthError(err: unknown): {
   ) {
     return {
       code,
-      message: 'Incorrect phone number or password. Please check and try again.',
+      message: 'Incorrect mobile number or password. Please check and try again.',
     };
   }
   if (code === 'auth/email-already-in-use') {
     return {
       code,
-      message:
-        'An Agent login for this phone number already exists. Sign in with your phone number and password.',
+      message: `A ${roleLabel} login for this mobile number already exists. Sign in with your mobile number and password.`,
     };
   }
   if (code === 'auth/weak-password') {
@@ -139,18 +146,18 @@ export function formatPhoneAuthError(err: unknown): {
     return {
       code,
       message:
-        'Please sign out and sign back in with your phone number and password before changing your password.',
+        'Please sign out and sign back in with your mobile number and password before changing your password.',
     };
   }
   if (code === 'auth/operation-not-allowed') {
     return {
       code,
       message:
-        'Phone & Password login requires Email/Password sign-in to be enabled in Firebase Console → Authentication → Sign-in method.',
+        'Mobile & Password login requires Email/Password sign-in to be enabled in Firebase Console → Authentication → Sign-in method.',
     };
   }
   const raw = err instanceof Error ? err.message : String(err);
-  return { code, message: raw || 'Unable to sign in with phone and password.' };
+  return { code, message: raw || 'Unable to sign in with mobile number and password.' };
 }
 
 export interface PhoneAuthOutcome {
@@ -186,12 +193,14 @@ interface FirebaseContextValue {
   signInWithGoogleRedirect: () => Promise<void>;
   signInWithPhoneCredentials: (
     phone: string,
-    password: string
+    password: string,
+    role?: PhoneAuthRole
   ) => Promise<PhoneAuthOutcome>;
   signUpWithPhoneCredentials: (
     phone: string,
     password: string,
-    displayName: string
+    displayName: string,
+    role?: PhoneAuthRole
   ) => Promise<PhoneAuthOutcome>;
   changeCurrentPassword: (
     newPassword: string
@@ -307,7 +316,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
 
           setDisplayName(
             sanitizeDisplayName(
-              nextUser.displayName ?? nextUser.email?.split('@')[0]
+              nextUser.displayName ??
+                (formatAuthIdentityLabel(nextUser.email) ||
+                  nextUser.email?.split('@')[0])
             )
           );
           try {
@@ -471,14 +482,18 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const signInWithPhoneCredentials = useCallback(
-    async (phone: string, password: string): Promise<PhoneAuthOutcome> => {
+    async (
+      phone: string,
+      password: string,
+      role: PhoneAuthRole = 'agent'
+    ): Promise<PhoneAuthOutcome> => {
       if (!auth) {
         return {
           user: null,
           error: 'Firebase Authentication is not configured.',
         };
       }
-      const authEmail = buildAgentAuthEmail(phone);
+      const authEmail = buildPhoneAuthEmail(role, phone);
       if (!authEmail) {
         return {
           user: null,
@@ -488,7 +503,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!password || password.length < 4) {
         return {
           user: null,
-          error: 'Enter your agent password.',
+          error: `Enter your ${role === 'parent' ? 'parent' : 'agent'} password.`,
         };
       }
       setAuthLoading(true);
@@ -502,7 +517,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
         setAuthLoading(false);
         return { user: credential.user };
       } catch (err) {
-        const formatted = formatPhoneAuthError(err);
+        const formatted = formatPhoneAuthError(err, role);
         setAuthLoading(false);
         return {
           user: null,
@@ -518,7 +533,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     async (
       phone: string,
       password: string,
-      nextDisplayName: string
+      nextDisplayName: string,
+      role: PhoneAuthRole = 'agent'
     ): Promise<PhoneAuthOutcome> => {
       if (!auth) {
         return {
@@ -526,7 +542,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'Firebase Authentication is not configured.',
         };
       }
-      const authEmail = buildAgentAuthEmail(phone);
+      const authEmail = buildPhoneAuthEmail(role, phone);
       if (!authEmail) {
         return {
           user: null,
@@ -547,14 +563,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
           authEmail,
           password
         );
-        const cleanName = sanitizeDisplayName(nextDisplayName || 'Partner');
+        const cleanName = sanitizeDisplayName(
+          nextDisplayName || (role === 'parent' ? 'Parent' : 'Partner')
+        );
         await updateProfile(credential.user, { displayName: cleanName }).catch(
           () => {}
         );
         setAuthLoading(false);
         return { user: credential.user };
       } catch (err) {
-        const formatted = formatPhoneAuthError(err);
+        const formatted = formatPhoneAuthError(err, role);
         setAuthLoading(false);
         return {
           user: null,

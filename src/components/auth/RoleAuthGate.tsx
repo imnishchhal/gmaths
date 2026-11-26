@@ -16,7 +16,7 @@ import {
 import { useFirebase } from '../../context/FirebaseContext';
 import { usePlatform } from '../../context/PlatformContext';
 import { PlatformRoute } from '../../types/platform';
-import { isPhoneAgentAuthEmail } from '../../utils/referral';
+import { formatAuthIdentityLabel } from '../../utils/referral';
 
 type AuthPortalRole = 'admin' | 'agent' | 'parent';
 
@@ -65,13 +65,13 @@ const ROLE_COPY: Record<
   parent: {
     title: 'Parent Portal Sign-In',
     subtitle:
-      'Check your yearly plan status, monitor child scores, and tap any child card to start math practice.',
+      'Sign in with your mobile number and password to check your yearly plan, view child progress, and start math practice.',
     googleHint:
-      'Sign in with the Google email registered by your field Agent. Children switch directly inside your dashboard — no child passwords needed.',
+      'Optional for Parent profiles linked to a Google email. Children switch directly inside your dashboard — no child passwords needed.',
     idLabel: 'Registered Mobile or Email',
     idPlaceholder: 'Enter mobile or email from Agent',
-    secretLabel: 'Parent Passcode',
-    secretPlaceholder: 'Enter passcode',
+    secretLabel: 'Parent Password',
+    secretPlaceholder: 'Enter password',
     submitLabel: 'Switch to Parent Portal',
   },
 };
@@ -87,7 +87,7 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
     signInAndRouteWithGoogle,
     signInWithGoogleRedirectFlow,
     loginAgentPhonePassword,
-    loginAgentPasscode,
+    loginParentPhonePassword,
     loginParentPasscode,
     registerSalesAgent,
     logoutRole,
@@ -98,6 +98,13 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
   const [agentPassword, setAgentPassword] = useState('');
   const [showAgentPassword, setShowAgentPassword] = useState(false);
   const [submittingAgentLogin, setSubmittingAgentLogin] = useState(false);
+
+  // Primary Parent Phone + Password login state
+  const [parentPhone, setParentPhone] = useState('');
+  const [parentPassword, setParentPassword] = useState('');
+  const [showParentPassword, setShowParentPassword] = useState(false);
+  const [submittingParentLogin, setSubmittingParentLogin] = useState(false);
+  const [showParentGoogle, setShowParentGoogle] = useState(false);
 
   // Sales Partner Registration (Phone + Password)
   const [showPartnerSignup, setShowPartnerSignup] = useState(false);
@@ -148,15 +155,25 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
     onNavigateRoute('/agent');
   };
 
+  const handleParentPhoneSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSubmittingParentLogin(true);
+    const res = await loginParentPhonePassword(parentPhone, parentPassword);
+    setSubmittingParentLogin(false);
+    if (!res.ok) {
+      setError(res.error || 'Incorrect mobile number or password.');
+      return;
+    }
+    onNavigateRoute('/parent');
+  };
+
   const handlePasscodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
 
-    const res =
-      targetRole === 'agent'
-        ? await loginAgentPasscode(identifier, secret)
-        : await loginParentPasscode(identifier, secret);
+    const res = await loginParentPasscode(identifier, secret);
 
     setSubmitting(false);
     if (!res.ok) {
@@ -185,10 +202,7 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
   };
 
   const combinedError = error || authError || roleResolveNotice;
-  const activeEmailDisplay =
-    user?.email && isPhoneAgentAuthEmail(user.email)
-      ? user.email.replace(/^agent\./, '').replace(/@gmaths\.local$/, '')
-      : user?.email;
+  const activeEmailDisplay = formatAuthIdentityLabel(user?.email);
 
   return (
     <div className="max-w-md mx-auto px-4 py-8 sm:py-14">
@@ -519,9 +533,241 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
               </div>
             )}
           </>
+        ) : targetRole === 'parent' ? (
+          /* ================================================================= */
+          /* PARENT PORTAL: MOBILE NUMBER + PASSWORD PRIMARY FLOW              */
+          /* ================================================================= */
+          <>
+            <form onSubmit={handleParentPhoneSubmit} className="space-y-3.5">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="parent-login-phone"
+                  className="block text-xs font-semibold text-slate-900 dark:text-white"
+                >
+                  Registered Mobile Number *
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="parent-login-phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    required
+                    value={parentPhone}
+                    onChange={(e) => setParentPhone(e.target.value)}
+                    placeholder="e.g. 9811223344"
+                    className="w-full min-h-[46px] pl-10 pr-3.5 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="parent-login-password"
+                  className="block text-xs font-bold text-slate-900 dark:text-white"
+                >
+                  Password *
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="parent-login-password"
+                    type={showParentPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    required
+                    value={parentPassword}
+                    onChange={(e) => setParentPassword(e.target.value)}
+                    placeholder="Enter password set by Agent"
+                    className="w-full min-h-[46px] pl-10 pr-12 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowParentPassword((v) => !v)}
+                    aria-label={
+                      showParentPassword ? 'Hide password' : 'Show password'
+                    }
+                    className="absolute right-0.5 top-0.5 min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  >
+                    {showParentPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submittingParentLogin || authLoading}
+                className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white font-display text-sm sm:text-base font-bold transition-all whitespace-nowrap"
+              >
+                {submittingParentLogin || authLoading
+                  ? 'Signing In…'
+                  : 'Sign In with Mobile & Password'}
+              </button>
+            </form>
+
+            {isConfigured && (
+              <div className="pt-3 border-t-2 border-sky-100 dark:border-slate-800 space-y-3">
+                {user && (
+                  <div className="rounded-2xl border-2 border-sky-100 dark:border-slate-800 bg-sky-50/50 dark:bg-slate-950/60 p-3.5 space-y-2.5">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Currently signed in
+                      </p>
+                      <p className="text-xs font-bold text-slate-950 dark:text-white break-all">
+                        {activeEmailDisplay}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleGoogleSignIn()}
+                        className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-xs font-semibold whitespace-nowrap"
+                      >
+                        Open Assigned Portal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void logoutRole()}
+                        className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 inline-flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <LogOut className="w-4 h-4 shrink-0" />
+                        Sign Out
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowParentGoogle((v) => !v)}
+                  className="w-full min-h-[44px] flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                >
+                  <span>Sign in with Google Account (Optional)</span>
+                  {showParentGoogle ? (
+                    <ChevronUp className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 shrink-0" />
+                  )}
+                </button>
+
+                {showParentGoogle && (
+                  <div className="space-y-2.5">
+                    <button
+                      type="button"
+                      disabled={authLoading}
+                      onClick={() => void handleGoogleSignIn()}
+                      className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-slate-900 dark:text-white text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap"
+                    >
+                      {authLoading
+                        ? 'Connecting Google…'
+                        : 'Sign in with Google'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={authLoading}
+                      onClick={() => void signInWithGoogleRedirectFlow()}
+                      className="w-full min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors"
+                    >
+                      Popup blocked on mobile? Use Redirect Sign-In
+                    </button>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {copy.googleHint}
+                    </p>
+                  </div>
+                )}
+
+                {user && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowPasscodeForm((v) => !v)}
+                      className="w-full min-h-[44px] flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    >
+                      <span>Switch to a synced parent account</span>
+                      {showPasscodeForm ? (
+                        <ChevronUp className="w-4 h-4 shrink-0" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 shrink-0" />
+                      )}
+                    </button>
+
+                    {showPasscodeForm && (
+                      <form onSubmit={handlePasscodeSubmit} className="space-y-3">
+                        <div className="space-y-1.5">
+                          <label
+                            htmlFor="role-identifier"
+                            className="block text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            {copy.idLabel}
+                          </label>
+                          <input
+                            id="role-identifier"
+                            type="text"
+                            autoComplete="username"
+                            value={identifier}
+                            onChange={(e) => setIdentifier(e.target.value)}
+                            placeholder={copy.idPlaceholder}
+                            required
+                            className="w-full min-h-[44px] px-3.5 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label
+                            htmlFor="role-secret"
+                            className="block text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            {copy.secretLabel}
+                          </label>
+                          <div className="relative">
+                            <input
+                              id="role-secret"
+                              type={showSecret ? 'text' : 'password'}
+                              autoComplete="current-password"
+                              value={secret}
+                              onChange={(e) => setSecret(e.target.value)}
+                              placeholder={copy.secretPlaceholder}
+                              required
+                              className="w-full min-h-[44px] pl-3.5 pr-12 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowSecret((s) => !s)}
+                              aria-label={
+                                showSecret ? 'Hide password' : 'Show password'
+                              }
+                              className="absolute right-0.5 top-0 min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                            >
+                              {showSecret ? (
+                                <EyeOff className="w-4 h-4" />
+                              ) : (
+                                <Eye className="w-4 h-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={submitting}
+                          className="w-full min-h-[46px] px-4 py-2 rounded-2xl bg-sky-500 hover:bg-sky-600 border-b-4 border-sky-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white text-sm font-bold transition-all whitespace-nowrap"
+                        >
+                          {submitting ? 'Verifying…' : copy.submitLabel}
+                        </button>
+                      </form>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           /* ================================================================= */
-          /* ADMIN & PARENT PORTALS: GOOGLE SIGN-IN + PASSCODE SWITCH          */
+          /* ADMIN PORTAL: GOOGLE SIGN-IN                                      */
           /* ================================================================= */
           <>
             {isConfigured ? (
@@ -587,90 +833,6 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
               <div className="rounded-2xl border-2 border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 p-4 text-xs sm:text-sm text-amber-800 dark:text-amber-300">
                 Firebase is not configured yet. Configure Cloud Firestore to
                 enable multi-device portals.
-              </div>
-            )}
-
-            {/* Secondary Passcode Switch (Only when connected for Parent portal switching) */}
-            {user && targetRole === 'parent' && (
-              <div className="pt-3 border-t-2 border-sky-100 dark:border-slate-800 space-y-3">
-                <button
-                  type="button"
-                  onClick={() => setShowPasscodeForm((v) => !v)}
-                  className="w-full min-h-[44px] flex items-center justify-between text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                >
-                  <span>Switch to a synced parent account with passcode</span>
-                  {showPasscodeForm ? (
-                    <ChevronUp className="w-4 h-4 shrink-0" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 shrink-0" />
-                  )}
-                </button>
-
-                {showPasscodeForm && (
-                  <form onSubmit={handlePasscodeSubmit} className="space-y-3.5">
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="role-identifier"
-                        className="block text-xs font-bold text-slate-900 dark:text-white"
-                      >
-                        {copy.idLabel}
-                      </label>
-                      <input
-                        id="role-identifier"
-                        type="text"
-                        autoComplete="username"
-                        value={identifier}
-                        onChange={(e) => setIdentifier(e.target.value)}
-                        placeholder={copy.idPlaceholder}
-                        required
-                        className="w-full min-h-[44px] px-3.5 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="role-secret"
-                        className="block text-xs font-bold text-slate-900 dark:text-white"
-                      >
-                        {copy.secretLabel}
-                      </label>
-                      <div className="relative">
-                        <input
-                          id="role-secret"
-                          type={showSecret ? 'text' : 'password'}
-                          autoComplete="current-password"
-                          value={secret}
-                          onChange={(e) => setSecret(e.target.value)}
-                          placeholder={copy.secretPlaceholder}
-                          required
-                          className="w-full min-h-[44px] pl-3.5 pr-12 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowSecret((s) => !s)}
-                          aria-label={
-                            showSecret ? 'Hide passcode' : 'Show passcode'
-                          }
-                          className="absolute right-0.5 top-0 min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                        >
-                          {showSecret ? (
-                            <EyeOff className="w-4 h-4" />
-                          ) : (
-                            <Eye className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="w-full min-h-[46px] px-4 py-2 rounded-2xl bg-sky-500 hover:bg-sky-600 border-b-4 border-sky-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white text-sm font-bold transition-all whitespace-nowrap"
-                    >
-                      {submitting ? 'Verifying…' : copy.submitLabel}
-                    </button>
-                  </form>
-                )}
               </div>
             )}
           </>

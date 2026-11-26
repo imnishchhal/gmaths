@@ -51,7 +51,7 @@ import {
 } from '../types/math';
 import {
   hashContactForAttribution,
-  isPhoneAgentAuthEmail,
+  isPhoneAuthEmail,
   normalizeEmailForMatch,
   normalizePhoneForMatch,
 } from '../utils/referral';
@@ -117,6 +117,7 @@ function mapAgentDoc(id: string, x: DocumentData, fallbackUid: string): AgentPro
         : undefined,
     defaultYearlyFee: Number(x.defaultYearlyFee ?? 0),
     passcodeHash: String(x.passcodeHash ?? ''),
+    password: typeof x.password === 'string' ? x.password : undefined,
     isActive: Boolean(x.isActive),
     createdAtMs: tsToMs(x.createdAt),
     updatedAtMs: tsToMs(x.updatedAt),
@@ -131,7 +132,12 @@ function mapParentDoc(id: string, x: DocumentData, fallbackUid: string): ParentP
     name: String(x.name ?? ''),
     contact: String(x.contact ?? ''),
     email: sanitizeEmail(String(x.email ?? '')),
+    authEmail:
+      typeof x.authEmail === 'string' && x.authEmail.trim()
+        ? sanitizeEmail(x.authEmail)
+        : undefined,
     passcodeHash: String(x.passcodeHash ?? ''),
+    password: typeof x.password === 'string' ? x.password : undefined,
     createdByAgentId: String(x.createdByAgentId ?? ''),
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     agentName: String(x.agentName ?? 'Field Agent'),
@@ -151,6 +157,10 @@ function mapChildDoc(id: string, x: DocumentData, fallbackUid: string): ChildPro
     parentId: String(x.parentId ?? ''),
     createdByAgentId: String(x.createdByAgentId ?? ''),
     parentEmail: sanitizeEmail(String(x.parentEmail ?? '')),
+    parentAuthEmail:
+      typeof x.parentAuthEmail === 'string' && x.parentAuthEmail.trim()
+        ? sanitizeEmail(x.parentAuthEmail)
+        : undefined,
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     name: String(x.name ?? ''),
     grade: normalizeIndianClass(String(x.grade ?? '3rd')),
@@ -169,6 +179,10 @@ function mapSubDoc(id: string, x: DocumentData, fallbackUid: string): Subscripti
     ownerUid: String(x.ownerUid ?? fallbackUid),
     parentId: String(x.parentId ?? ''),
     parentEmail: sanitizeEmail(String(x.parentEmail ?? '')),
+    parentAuthEmail:
+      typeof x.parentAuthEmail === 'string' && x.parentAuthEmail.trim()
+        ? sanitizeEmail(x.parentAuthEmail)
+        : undefined,
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     planType: 'yearly',
     startDate: String(x.startDate ?? ''),
@@ -191,6 +205,10 @@ function mapPracticeDoc(id: string, x: DocumentData, fallbackUid: string): Pract
     childId: String(x.childId ?? ''),
     parentId: String(x.parentId ?? ''),
     parentEmail: sanitizeEmail(String(x.parentEmail ?? '')),
+    parentAuthEmail:
+      typeof x.parentAuthEmail === 'string' && x.parentAuthEmail.trim()
+        ? sanitizeEmail(x.parentAuthEmail)
+        : undefined,
     agentEmail: sanitizeEmail(String(x.agentEmail ?? '')),
     grade: normalizeIndianClass(String(x.grade ?? '3rd')),
     mode: (x.mode as ArithmeticMode) ?? 'mixed',
@@ -411,7 +429,7 @@ export interface ResolvedFirestoreRole {
 function isTrustedEmailIdentity(user: User, emailLower: string): boolean {
   return Boolean(
     emailLower.length >= 3 &&
-      (user.emailVerified || isPhoneAgentAuthEmail(emailLower))
+      (user.emailVerified || isPhoneAuthEmail(emailLower))
   );
 }
 
@@ -489,11 +507,20 @@ export async function resolveUserRoleFromFirestore(
     handleFirestoreError(error, OperationType.LIST, 'agents');
   }
 
-  // 4. Parent matched by verified Google email
+  // 4. Parent matched by verified Google email or phone-auth email (authEmail)
   try {
-    const parentSnap = await getDocs(
+    const parentEmailSnap = await getDocs(
       query(collection(firestore, 'parents'), where('email', '==', emailLower), limit(5))
     );
+    const parentSnap = !parentEmailSnap.empty
+      ? parentEmailSnap
+      : await getDocs(
+          query(
+            collection(firestore, 'parents'),
+            where('authEmail', '==', emailLower),
+            limit(5)
+          )
+        );
     if (!parentSnap.empty) {
       const parentDoc = parentSnap.docs[0];
       const parent = mapParentDoc(parentDoc.id, parentDoc.data(), user.uid);
@@ -633,6 +660,15 @@ export function subscribePlatformWorkspace(
                     limit(25)
                   ),
                 },
+                {
+                  key: 'parentAuthEmail',
+                  path: 'parents',
+                  q: query(
+                    collection(firestore, 'parents'),
+                    where('authEmail', '==', emailLower),
+                    limit(25)
+                  ),
+                },
               ]
             : []),
         ];
@@ -679,6 +715,15 @@ export function subscribePlatformWorkspace(
                   q: query(
                     collection(firestore, colName),
                     where('parentEmail', '==', emailLower),
+                    limit(250)
+                  ),
+                },
+                {
+                  key: 'parentAuthEmail',
+                  path: colName,
+                  q: query(
+                    collection(firestore, colName),
+                    where('parentAuthEmail', '==', emailLower),
                     limit(250)
                   ),
                 },
@@ -1027,6 +1072,9 @@ export async function cloudCreateAgent(
     commissionPerConversion: clamp(agent.commissionPerConversion ?? 0, 0, 10000),
     defaultYearlyFee: clamp(agent.defaultYearlyFee, 0, 1000000),
     passcodeHash: sanitizeHash(agent.passcodeHash),
+    ...(typeof agent.password === 'string' && agent.password.length > 0
+      ? { password: agent.password.slice(0, 128) }
+      : {}),
     isActive: Boolean(agent.isActive),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -1051,7 +1099,7 @@ export async function cloudUpdateAgent(agent: AgentProfile): Promise<void> {
   const path = `agents/${id}`;
   const email = sanitizeEmail(agent.email);
   if (email.length < 3) {
-    throw new Error('Agent email is required for cross-device Google Sign-In.');
+    throw new Error('Agent email is required for cross-device sync.');
   }
   const approvalStatus = getAgentApprovalStatus(agent);
   try {
@@ -1068,6 +1116,9 @@ export async function cloudUpdateAgent(agent: AgentProfile): Promise<void> {
       commissionPerConversion: clamp(agent.commissionPerConversion ?? 0, 0, 10000),
       defaultYearlyFee: clamp(agent.defaultYearlyFee, 0, 1000000),
       passcodeHash: sanitizeHash(agent.passcodeHash),
+      ...(typeof agent.password === 'string' && agent.password.length > 0
+        ? { password: agent.password.slice(0, 128) }
+        : {}),
       isActive: Boolean(agent.isActive),
       updatedAt: serverTimestamp(),
     });
@@ -1104,6 +1155,26 @@ export async function cloudUpdateAgentSelfProfile(
   }
 }
 
+export async function cloudUpdateAgentPassword(
+  agentId: string,
+  password: string,
+  passcodeHash: string
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(agentId, 'ag');
+  const path = `agents/${id}`;
+  try {
+    await updateDoc(doc(firestore, 'agents', id), {
+      password: password.slice(0, 128),
+      passcodeHash: sanitizeHash(passcodeHash),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
 export async function cloudUpdateAgentPasswordHash(
   agentId: string,
   passcodeHash: string
@@ -1130,6 +1201,7 @@ export async function cloudCreateParent(
   const firestore = db;
   const id = sanitizeId(parent.id, 'par');
   const path = `parents/${id}`;
+  const authEmail = sanitizeEmail(parent.authEmail ?? '');
   try {
     await setDoc(doc(firestore, 'parents', id), {
       id,
@@ -1138,7 +1210,11 @@ export async function cloudCreateParent(
       name: (parent.name.trim() || 'Parent').slice(0, 80),
       contact: (parent.contact.trim() || '000').slice(0, 120),
       email: sanitizeEmail(parent.email),
+      ...(authEmail ? { authEmail } : {}),
       passcodeHash: sanitizeHash(parent.passcodeHash),
+      ...(typeof parent.password === 'string' && parent.password.length > 0
+        ? { password: parent.password.slice(0, 128) }
+        : {}),
       createdByAgentId: sanitizeId(parent.createdByAgentId, 'ag'),
       agentEmail: sanitizeEmail(parent.agentEmail),
       agentName: (parent.agentName.trim() || 'Field Agent').slice(0, 80),
@@ -1153,6 +1229,26 @@ export async function cloudCreateParent(
   }
 }
 
+export async function cloudUpdateParentPassword(
+  parentId: string,
+  password: string,
+  passcodeHash: string
+): Promise<void> {
+  if (!db) throw new Error('Cloud Firestore is not initialized.');
+  const firestore = db;
+  const id = sanitizeId(parentId, 'par');
+  const path = `parents/${id}`;
+  try {
+    await updateDoc(doc(firestore, 'parents', id), {
+      password: password.slice(0, 128),
+      passcodeHash: sanitizeHash(passcodeHash),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
 export async function cloudCreateChild(
   user: User,
   child: ChildProfile
@@ -1161,6 +1257,7 @@ export async function cloudCreateChild(
   const firestore = db;
   const id = sanitizeId(child.id, 'ch');
   const path = `children/${id}`;
+  const parentAuthEmail = sanitizeEmail(child.parentAuthEmail ?? '');
   try {
     await setDoc(doc(firestore, 'children', id), {
       id,
@@ -1169,6 +1266,7 @@ export async function cloudCreateChild(
       parentId: sanitizeId(child.parentId, 'par'),
       createdByAgentId: sanitizeId(child.createdByAgentId, 'ag'),
       parentEmail: sanitizeEmail(child.parentEmail),
+      ...(parentAuthEmail ? { parentAuthEmail } : {}),
       agentEmail: sanitizeEmail(child.agentEmail),
       name: (child.name.trim() || 'Student').slice(0, 60),
       grade: normalizeIndianClass(child.grade),
@@ -1191,6 +1289,7 @@ export async function cloudCreateSubscription(
   const firestore = db;
   const id = sanitizeId(sub.id, 'sub');
   const path = `subscriptions/${id}`;
+  const parentAuthEmail = sanitizeEmail(sub.parentAuthEmail ?? '');
   try {
     await setDoc(doc(firestore, 'subscriptions', id), {
       id,
@@ -1198,6 +1297,7 @@ export async function cloudCreateSubscription(
       ownerUid: sanitizeId(user.uid, 'u'),
       parentId: sanitizeId(sub.parentId, 'par'),
       parentEmail: sanitizeEmail(sub.parentEmail),
+      ...(parentAuthEmail ? { parentAuthEmail } : {}),
       agentEmail: sanitizeEmail(sub.agentEmail),
       planType: 'yearly',
       startDate: sanitizeDate(sub.startDate),
@@ -1278,6 +1378,7 @@ export async function cloudCreatePracticeSession(
     ? session.weakTopic
     : 'none';
 
+  const parentAuthEmail = sanitizeEmail(session.parentAuthEmail ?? '');
   try {
     await setDoc(doc(firestore, 'practiceSessions', id), {
       id,
@@ -1286,6 +1387,7 @@ export async function cloudCreatePracticeSession(
       childId: sanitizeId(session.childId, 'ch'),
       parentId: sanitizeId(session.parentId, 'par'),
       parentEmail: sanitizeEmail(session.parentEmail),
+      ...(parentAuthEmail ? { parentAuthEmail } : {}),
       agentEmail: sanitizeEmail(session.agentEmail),
       grade: normalizeIndianClass(session.grade),
       mode,

@@ -6,7 +6,10 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  Eye,
+  EyeOff,
   GraduationCap,
+  Lock,
   LogOut,
   MapPin,
   Phone,
@@ -15,6 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { usePlatform } from '../../context/PlatformContext';
+import { formatAuthIdentityLabel } from '../../utils/referral';
 import {
   INDIAN_CLASS_META,
   MODE_META,
@@ -40,6 +44,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
     roleSession,
     logoutRole,
     switchToChildMode,
+    changeParentPassword,
     getParentById,
     getAgentById,
     getChildrenForParent,
@@ -48,6 +53,13 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
   } = usePlatform();
 
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [showSavedPassword, setShowSavedPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   const parent = roleSession ? getParentById(roleSession.accountId) : undefined;
 
@@ -94,6 +106,31 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
     onStartChildPractice(child);
   };
 
+  const handleChangeParentPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setSavingPassword(true);
+    const res = await changeParentPassword(parent.id, newPassword);
+    setSavingPassword(false);
+    if (!res.ok) {
+      setPasswordError(res.error || 'Could not update password.');
+      return;
+    }
+    setNewPassword('');
+    setConfirmPassword('');
+    setPasswordSuccess('Your login password has been updated.');
+    window.setTimeout(() => setPasswordSuccess(null), 4000);
+  };
+
   const bannerClasses =
     subEval.state === 'active'
       ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/30'
@@ -138,7 +175,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
           <div className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-600 dark:text-sky-400">
             <Users className="w-4 h-4 shrink-0" />
             <span>
-              Parent Portal · {parent.email || parent.contact}
+              Parent Portal · {formatAuthIdentityLabel(parent.email) || parent.contact}
             </span>
           </div>
           <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white">
@@ -431,6 +468,142 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
             })}
           </div>
         )}
+      </section>
+
+      {/* Parent Account & Password Section */}
+      <section
+        aria-label="Parent Login Credentials"
+        className="rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-4 sm:p-6 space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b-2 border-sky-50 dark:border-slate-800">
+          <div className="space-y-0.5">
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-600 dark:text-sky-400">
+              <Lock className="w-4 h-4 shrink-0" />
+              <span>Account &amp; Login Password</span>
+            </div>
+            <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+              Mobile Login Credentials
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm">
+            <div className="rounded-xl border border-sky-100 dark:border-slate-800 bg-sky-50/60 dark:bg-slate-950 px-3 py-2">
+              <span className="text-slate-500 dark:text-slate-400 mr-1.5">
+                Mobile:
+              </span>
+              <span className="font-mono font-bold text-slate-950 dark:text-white">
+                {parent.contact}
+              </span>
+            </div>
+
+            {parent.password && (
+              <div className="rounded-xl border border-sky-100 dark:border-slate-800 bg-sky-50/60 dark:bg-slate-950 px-3 py-2 inline-flex items-center gap-2">
+                <span className="text-slate-500 dark:text-slate-400">
+                  Saved Password:
+                </span>
+                <span className="font-mono font-bold text-slate-950 dark:text-white">
+                  {showSavedPassword ? parent.password : '••••••••'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSavedPassword((v) => !v)}
+                  aria-label={
+                    showSavedPassword ? 'Hide saved password' : 'Show saved password'
+                  }
+                  className="p-1 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                >
+                  {showSavedPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {passwordError && (
+          <div className="rounded-2xl border-2 border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-3.5 py-2.5 flex items-center gap-2 text-xs sm:text-sm text-rose-700 dark:text-rose-300">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{passwordError}</span>
+          </div>
+        )}
+
+        {passwordSuccess && (
+          <div className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-2.5 flex items-center gap-2 text-xs sm:text-sm text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{passwordSuccess}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangeParentPassword} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <div className="space-y-1">
+              <label
+                htmlFor="parent-new-password"
+                className="block text-xs font-bold text-slate-700 dark:text-slate-300"
+              >
+                New Password (min 6 chars)
+              </label>
+              <div className="relative">
+                <input
+                  id="parent-new-password"
+                  type={showNewPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                  className="w-full min-h-[44px] pl-3 pr-11 py-2 rounded-xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((v) => !v)}
+                  aria-label={
+                    showNewPassword ? 'Hide password' : 'Show password'
+                  }
+                  className="absolute right-0.5 top-0 min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="parent-confirm-password"
+                className="block text-xs font-bold text-slate-700 dark:text-slate-300"
+              >
+                Confirm Password
+              </label>
+              <input
+                id="parent-confirm-password"
+                type={showNewPassword ? 'text' : 'password'}
+                required
+                minLength={6}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter password"
+                className="w-full min-h-[44px] px-3 py-2 rounded-xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingPassword}
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 border-b-4 border-sky-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white text-xs sm:text-sm font-bold transition-all whitespace-nowrap"
+            >
+              {savingPassword ? 'Updating…' : 'Update Password'}
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );

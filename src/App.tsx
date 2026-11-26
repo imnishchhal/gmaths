@@ -528,7 +528,7 @@ const MathSpeedsterShell: React.FC = () => {
     : null;
 
   return (
-    <div className="min-h-screen w-full max-w-[100vw] overflow-x-clip flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-clip flex flex-col bg-[#FFFDF5] dark:bg-[#0F172A] kids-canvas-bg text-slate-900 dark:text-slate-100">
       <Header
         route={route}
         activeView={activeView}
@@ -539,11 +539,11 @@ const MathSpeedsterShell: React.FC = () => {
       {appConfig.announcementEnabled &&
         appConfig.announcementText.trim().length > 0 &&
         dismissedAnnouncementText !== appConfig.announcementText && (
-          <div className="w-full bg-indigo-600 dark:bg-indigo-900 text-white border-b border-indigo-500/40">
+          <div className="w-full bg-violet-600 dark:bg-violet-900 text-white border-b-2 border-violet-400/40">
             <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex items-center justify-between gap-3 text-xs sm:text-sm">
               <div className="flex items-center gap-2 min-w-0">
-                <Megaphone className="w-4 h-4 shrink-0" />
-                <span className="font-medium break-words">
+                <Megaphone className="w-4 h-4 shrink-0 text-amber-300" />
+                <span className="font-bold break-words">
                   {appConfig.announcementText}
                 </span>
               </div>
@@ -553,7 +553,7 @@ const MathSpeedsterShell: React.FC = () => {
                   setDismissedAnnouncementText(appConfig.announcementText)
                 }
                 aria-label="Dismiss announcement"
-                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-white/15 shrink-0"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl hover:bg-white/15 shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -563,16 +563,16 @@ const MathSpeedsterShell: React.FC = () => {
 
       {/* Active Student Mode Context Bar */}
       {activeChild && route === '/' && (
-        <div className="w-full bg-blue-50/80 dark:bg-blue-950/35 border-b border-blue-200/80 dark:border-blue-900/60">
+        <div className="w-full bg-sky-100/90 dark:bg-sky-950/50 border-b-2 border-sky-200 dark:border-sky-800/70">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
-              <GraduationCap className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-              <span className="font-semibold text-slate-900 dark:text-white truncate">
+              <GraduationCap className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+              <span className="font-bold text-slate-900 dark:text-white truncate">
                 Practicing as {activeChild.name} (
                 {formatIndianClassLabel(activeChild.grade)})
               </span>
               {activeChildSubEval?.state === 'expiring_soon' && (
-                <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+                <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
                   <Clock className="w-3.5 h-3.5 shrink-0" />
                   Plan expires in {activeChildSubEval.daysLeft}d
                 </span>
@@ -582,7 +582,7 @@ const MathSpeedsterShell: React.FC = () => {
             <button
               type="button"
               onClick={handleBackToParentPortal}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-1 rounded-xl bg-white dark:bg-slate-900 border-2 border-sky-200 dark:border-sky-700 text-xs font-bold text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
             >
               <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
               Exit / Back to Parent Portal
@@ -594,10 +594,10 @@ const MathSpeedsterShell: React.FC = () => {
       {/* Non-intrusive inline error notice if auth/cloud encounters an issue */}
       {noticeError && (
         <div className="max-w-6xl w-full mx-auto px-4 sm:px-6 pt-4">
-          <div className="rounded-xl border border-amber-200 dark:border-amber-900/70 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 flex items-start justify-between gap-3 text-xs sm:text-sm text-amber-900 dark:text-amber-200">
+          <div className="rounded-2xl border-2 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/50 px-4 py-3 flex items-start justify-between gap-3 text-xs sm:text-sm text-amber-950 dark:text-amber-200">
             <div className="flex items-start gap-2 min-w-0">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span className="break-words">
+              <span className="break-words font-medium">
                 {noticeError.startsWith('{')
                   ? 'A Cloud Firestore permission or network error occurred. Verify you are signed in with the right Google account and retry.'
                   : noticeError}
@@ -610,7 +610,7 @@ const MathSpeedsterShell: React.FC = () => {
                 dismissPlatformError();
               }}
               aria-label="Dismiss notice"
-              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg hover:bg-amber-200/50 dark:hover:bg-amber-900/50 shrink-0"
+              className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl hover:bg-amber-200/50 dark:hover:bg-amber-900/50 shrink-0"
             >
               <X className="w-4 h-4" />
             </button>
@@ -624,7 +624,7 @@ const MathSpeedsterShell: React.FC = () => {
           <div
             role="tablist"
             aria-label="Progress views"
-            className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 max-w-md"
+            className="grid grid-cols-3 gap-1.5 p-1.5 rounded-2xl bg-sky-100/80 dark:bg-slate-900 border-2 border-sky-200/80 dark:border-slate-800 max-w-md"
           >
             {(
               [
@@ -642,9 +642,9 @@ const MathSpeedsterShell: React.FC = () => {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveView(item.id)}
-                  className={`min-h-[44px] px-2.5 py-2 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
+                  className={`min-h-[44px] px-2.5 py-2 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
                     active
-                      ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >

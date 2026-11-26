@@ -322,8 +322,8 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           kind: 'correct',
           message:
             streakRef.current >= 5 && streakRef.current % 5 === 0
-              ? `Streak ×${streakRef.current} · ${(responseMs / 1000).toFixed(2)}s`
-              : `Correct · ${(responseMs / 1000).toFixed(2)}s`,
+              ? `Super Streak ×${streakRef.current}! · ${(responseMs / 1000).toFixed(2)}s`
+              : `Awesome! · ${(responseMs / 1000).toFixed(2)}s`,
         });
         advanceProblem();
       } else {
@@ -336,7 +336,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           message:
             outcome === 'skipped'
               ? `Skipped · Answer was ${current.answer}`
-              : `Incorrect · Answer was ${current.answer}`,
+              : `Nice try! Answer was ${current.answer}`,
         });
 
         if (effectiveSessionType === 'streak') {
@@ -546,15 +546,15 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
 
   const answerBoxTone =
     feedback?.kind === 'correct'
-      ? 'border-emerald-500 dark:border-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/25'
+      ? 'border-emerald-500 dark:border-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/30 shadow-[0_4px_0_0_rgba(16,185,129,0.25)]'
       : feedback?.kind === 'wrong' || feedback?.kind === 'skipped'
-      ? 'border-red-500 dark:border-red-400 bg-red-50/40 dark:bg-red-950/25 animate-shake'
-      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:border-blue-600 dark:focus-within:border-blue-500';
+      ? 'border-rose-500 dark:border-rose-400 bg-rose-50/70 dark:bg-rose-950/30 animate-shake'
+      : 'border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 focus-within:border-sky-500 dark:focus-within:border-sky-400 shadow-[0_4px_0_0_rgba(125,211,252,0.45)] dark:shadow-none';
 
   return (
-    <div className="h-screen-safe w-full max-w-[100vw] overflow-hidden flex flex-col justify-between bg-slate-50 dark:bg-slate-950">
+    <div className="h-screen-safe w-full max-w-[100vw] overflow-hidden flex flex-col justify-between bg-[#FFFDF5] dark:bg-[#0F172A] kids-canvas-bg">
       {/* Compact Practice Header HUD */}
-      <div className="shrink-0 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+      <div className="shrink-0 bg-white/95 dark:bg-[#131C33]/95 border-b-2 border-sky-100 dark:border-slate-800">
         <div className="max-w-5xl mx-auto px-2 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-3">
           {/* Left: Back to Parent Portal (if in Child Mode) or Exit / Finish */}
           <div className="flex items-center gap-1 shrink-0">
@@ -562,7 +562,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               <button
                 type="button"
                 onClick={onBackToParent}
-                className="inline-flex items-center justify-center gap-1 min-h-[44px] px-2.5 sm:px-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 text-xs sm:text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] px-2.5 sm:px-3 rounded-xl border-2 border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/50 text-xs sm:text-sm font-bold text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-950 transition-colors whitespace-nowrap shrink-0"
               >
                 <ArrowLeft className="w-4 h-4 shrink-0" />
                 <span className="hidden xs:inline sm:inline">Parent Portal</span>
@@ -578,7 +578,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                     onExit();
                   }
                 }}
-                className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-lg text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
               >
                 <X className="w-4 h-4 shrink-0" />
                 <span>
@@ -595,7 +595,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                 <button
                   type="button"
                   onClick={() => finalizeSession()}
-                  className="inline-flex items-center justify-center min-h-[44px] px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap shrink-0"
+                  className="inline-flex items-center justify-center min-h-[44px] px-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 border-b-2 border-emerald-700 text-white text-xs font-bold whitespace-nowrap shrink-0"
                 >
                   Finish
                 </button>
@@ -604,34 +604,34 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
 
           {/* Center: High-Contrast Tabular Timer */}
           <div
-            className={`inline-flex items-center gap-1 font-mono text-base sm:text-xl font-bold tabular-nums shrink-0 ${
+            className={`inline-flex items-center gap-1.5 font-mono text-base sm:text-xl font-bold tabular-nums shrink-0 ${
               isLowTime
-                ? 'text-red-600 dark:text-red-400'
+                ? 'text-rose-600 dark:text-rose-400'
                 : 'text-slate-950 dark:text-white'
             }`}
           >
-            <Timer className="w-4 h-4 shrink-0" />
+            <Timer className={`w-4 h-4 shrink-0 ${isLowTime ? 'text-rose-500' : 'text-sky-500'}`} />
             <span>{displayClock}</span>
           </div>
 
           {/* Right: Live Score, Streak, Onscreen Keypad Toggle & Mute */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <div className="flex items-center gap-2 sm:gap-3 font-mono text-sm tabular-nums mr-0.5">
-              <span className="text-slate-500 dark:text-slate-400 text-xs font-sans">
+              <span className="text-slate-500 dark:text-slate-400 text-xs font-sans font-semibold">
                 <span className="hidden sm:inline">Score </span>
-                <strong className="font-mono font-bold text-slate-950 dark:text-white text-base">
+                <strong className="font-display font-bold text-sky-700 dark:text-sky-300 text-base sm:text-lg">
                   {score}
                 </strong>
               </span>
               <span
-                className={`inline-flex items-center gap-0.5 font-semibold ${
+                className={`inline-flex items-center gap-0.5 font-bold ${
                   streak >= 5
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-slate-600 dark:text-slate-300'
+                    ? 'text-orange-500 dark:text-amber-400'
+                    : 'text-amber-600 dark:text-amber-400'
                 }`}
                 title="Current Streak"
               >
-                <Flame className="w-3.5 h-3.5 shrink-0" />
+                <Flame className="w-4 h-4 shrink-0 fill-current" />
                 {streak}
               </span>
             </div>
@@ -645,9 +645,9 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                   ? 'Hide onscreen keypad (use phone native keyboard)'
                   : 'Show onscreen keypad'
               }
-              className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-2.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+              className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] px-2.5 rounded-xl border-2 text-xs font-bold transition-colors whitespace-nowrap shrink-0 ${
                 showOnscreenKeypad
-                  ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
+                  ? 'border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300'
                   : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
               }`}
             >
@@ -660,28 +660,28 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
             <button
               type="button"
               onClick={onToggleMute}
-              className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              className="min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors shrink-0"
               aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
             >
               {muted ? (
                 <VolumeX className="w-4 h-4" />
               ) : (
-                <Volume2 className="w-4 h-4" />
+                <Volume2 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
               )}
             </button>
           </div>
         </div>
 
-        {/* Hairline Sprint / Weak-Spot Progress Bar */}
+        {/* Cheerful Sprint / Weak-Spot Progress Bar */}
         {(effectiveSessionType === 'sprint' || isWeakSpotsDrill) && (
-          <div className="h-1 w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+          <div className="h-1.5 w-full bg-sky-100 dark:bg-slate-900 overflow-hidden">
             <div
               className={`h-full transition-transform duration-100 origin-left ${
                 isLowTime
-                  ? 'bg-red-500'
+                  ? 'bg-rose-500'
                   : isWeakSpotsDrill
-                  ? 'bg-emerald-600 dark:bg-emerald-500'
-                  : 'bg-blue-600 dark:bg-blue-500'
+                  ? 'bg-emerald-500 dark:bg-emerald-400'
+                  : 'bg-sky-500 dark:bg-sky-400'
               }`}
               style={{ transform: `scaleX(${progressPct / 100})` }}
             />
@@ -693,10 +693,10 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
       <main className="flex-1 min-h-0 flex flex-col items-center justify-center px-4 py-2 sm:py-5 overflow-y-auto">
         <div className="w-full max-w-xl flex flex-col items-center text-center space-y-2.5 sm:space-y-5">
           {/* Quiet Preset & Student Context */}
-          <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+          <p className="text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-400">
             {activeStudentLabel ? `${activeStudentLabel} · ` : ''}
             {isWeakSpotsDrill && config.adaptiveQueue
-              ? `Adaptive Weak-Spot Drill · Question ${Math.min(
+              ? `Practice Weak Spots · Question ${Math.min(
                   queueIndex + 1,
                   config.adaptiveQueue.length
                 )} of ${config.adaptiveQueue.length}`
@@ -717,13 +717,13 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                 )}
           </p>
 
-          {/* Dominant Arithmetic Problem */}
+          {/* Dominant Friendly Arithmetic Problem */}
           <div
             key={problem.id}
-            className="animate-pop font-mono text-4xl sm:text-7xl md:text-8xl font-bold tracking-tight text-slate-950 dark:text-white tabular-nums leading-none"
+            className="animate-pop font-display text-5xl sm:text-7xl md:text-8xl font-bold tracking-tight text-slate-950 dark:text-white tabular-nums leading-none"
           >
             <span>{problem.operandA}</span>
-            <span className="mx-2.5 sm:mx-5 text-blue-600 dark:text-blue-400">
+            <span className="mx-3 sm:mx-5 text-orange-500 dark:text-amber-400">
               {problem.symbol}
             </span>
             <span>{problem.operandB}</span>
@@ -733,7 +733,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
           <div className="w-full max-w-[260px] sm:max-w-sm">
             <div
               key={feedback?.id ?? 'idle'}
-              className={`relative h-14 sm:h-20 rounded-2xl border-2 flex items-center justify-center px-4 transition-colors duration-150 ${answerBoxTone}`}
+              className={`relative h-14 sm:h-20 rounded-3xl border-[3px] flex items-center justify-center px-4 transition-colors duration-150 ${answerBoxTone}`}
             >
               <input
                 ref={answerInputElRef}
@@ -749,14 +749,14 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                 onChange={handleNativeInputChange}
                 onKeyDown={handleInputKeyDown}
                 aria-label={`Answer for ${problem.operandA} ${problem.symbol} ${problem.operandB}`}
-                className="w-full h-full bg-transparent text-center font-mono text-3xl sm:text-5xl font-bold text-slate-950 dark:text-white tabular-nums focus:outline-none placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                className="w-full h-full bg-transparent text-center font-display text-3xl sm:text-5xl font-bold text-slate-950 dark:text-white tabular-nums focus:outline-none placeholder:text-sky-300 dark:placeholder:text-slate-600"
                 placeholder="?"
               />
             </div>
-            <p className="mt-1.5 text-[11px] sm:text-xs text-slate-400 dark:text-slate-500">
+            <p className="mt-1.5 text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400">
               {showOnscreenKeypad
-                ? 'Tap box for phone keyboard or use keypad below'
-                : 'Type with your keyboard · Toggle keypad in header'}
+                ? 'Tap box for phone keyboard or tap the big number buttons below'
+                : 'Type your answer · Toggle keypad in header'}
             </p>
           </div>
 
@@ -765,10 +765,10 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
             {feedback ? (
               <div
                 key={feedback.id}
-                className={`animate-pop inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold tabular-nums ${
+                className={`animate-pop inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold tabular-nums ${
                   feedback.kind === 'correct'
                     ? 'text-emerald-700 dark:text-emerald-400'
-                    : 'text-red-600 dark:text-red-400'
+                    : 'text-rose-600 dark:text-rose-400'
                 }`}
               >
                 {feedback.kind === 'correct' ? (
@@ -779,7 +779,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
                 <span>{feedback.message}</span>
               </div>
             ) : (
-              <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 tabular-nums">
                 Accuracy{' '}
                 <strong className="font-mono text-slate-800 dark:text-slate-200">
                   {liveAccuracy}%
@@ -802,14 +802,14 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="min-h-[44px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+                className="min-h-[44px] px-6 py-2 rounded-2xl bg-emerald-500 hover:bg-emerald-600 border-b-4 border-emerald-700 active:border-b-0 active:translate-y-[2px] text-white font-display text-sm font-bold transition-all whitespace-nowrap"
               >
                 Submit
               </button>
               <button
                 type="button"
                 onClick={handleSkip}
-                className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-2xl border-2 border-b-4 border-sky-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-sky-50 dark:hover:bg-slate-800 text-sm font-bold text-sky-800 dark:text-sky-300 transition-all whitespace-nowrap"
               >
                 <SkipForward className="w-4 h-4" />
                 Skip
@@ -821,7 +821,7 @@ export const ActiveDrill: React.FC<ActiveDrillProps> = ({
 
       {/* Webpage Onscreen Numeric Keypad (Toggleable via Practice Header) */}
       {showOnscreenKeypad && (
-        <div className="shrink-0 px-2.5 sm:px-4 pt-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] bg-white/95 dark:bg-slate-950/95 border-t border-slate-200/80 dark:border-slate-800/80">
+        <div className="shrink-0 px-2.5 sm:px-4 pt-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] bg-white/95 dark:bg-[#131C33]/95 border-t-2 border-sky-100 dark:border-slate-800">
           <NumericKeypad
             allowNegatives={config.allowNegatives}
             onDigit={handleDigit}

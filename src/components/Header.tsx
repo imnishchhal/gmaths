@@ -140,7 +140,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="sticky top-0 z-30 w-full max-w-[100vw] bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+      <header className="sticky top-0 z-30 w-full max-w-[100vw] bg-white/95 dark:bg-[#131C33]/95 backdrop-blur-md border-b-2 border-sky-100 dark:border-slate-800">
         <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3 md:gap-8">
           {/* Left: Mobile Drawer Button + Brand Wordmark */}
           <div className="flex items-center gap-1.5 min-w-0 shrink-0">
@@ -148,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-label="Open navigation menu"
-              className="md:hidden min-h-[44px] min-w-[44px] -ml-1.5 rounded-lg flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              className="md:hidden min-h-[44px] min-w-[44px] -ml-1.5 rounded-xl flex items-center justify-center text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors shrink-0"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -156,9 +156,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => go('/', 'play')}
-              className="font-display text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded"
+              className="font-display text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg px-1"
             >
-              Math Speedster
+              Math <span className="text-orange-500 dark:text-amber-400">Speedster</span>
             </button>
           </div>
 
@@ -172,9 +172,9 @@ export const Header: React.FC<HeaderProps> = ({
                 key={item.key}
                 type="button"
                 onClick={item.onClick}
-                className={`relative py-4 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded ${
+                className={`relative py-4 text-sm font-bold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded ${
                   item.active
-                    ? 'text-slate-950 dark:text-white'
+                    ? 'text-sky-700 dark:text-sky-300'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                 }`}
               >
@@ -182,7 +182,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {item.active && (
                   <span
                     aria-hidden="true"
-                    className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-600 dark:bg-blue-500"
+                    className="absolute left-0 right-0 bottom-0 h-1 rounded-t-full bg-sky-500 dark:bg-sky-400"
                   />
                 )}
               </button>
@@ -198,7 +198,7 @@ export const Header: React.FC<HeaderProps> = ({
                   exitChildModeToParent();
                   go('/parent');
                 }}
-                className="inline-flex items-center gap-1.5 min-h-[44px] px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-600 border-b-2 border-sky-700 text-white text-xs sm:text-sm font-bold transition-colors whitespace-nowrap shrink-0"
               >
                 <ArrowLeft className="w-4 h-4 shrink-0" />
                 <span className="hidden sm:inline">Back to Parent Portal</span>
@@ -212,15 +212,15 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     type="button"
                     onClick={() => setMenuOpen((o) => !o)}
-                    className="inline-flex items-center gap-2 min-h-[44px] px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium text-slate-900 dark:text-slate-100 transition-colors whitespace-nowrap shrink-0 max-w-[155px] sm:max-w-[200px]"
+                    className="inline-flex items-center gap-2 min-h-[44px] px-3 py-1.5 rounded-xl border-2 border-sky-200 dark:border-slate-700 bg-sky-50/70 dark:bg-slate-900 hover:bg-sky-100/80 dark:hover:bg-slate-800 text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 transition-colors whitespace-nowrap shrink-0 max-w-[155px] sm:max-w-[200px]"
                   >
-                    <UserIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <UserIcon className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
                     <span className="truncate">{activeAccountLabel}</span>
                   </button>
                 )}
 
                 {menuOpen && !isChildSession && (
-                  <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg p-4 space-y-4 z-50">
+                  <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-2xl border-2 border-sky-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg p-4 space-y-4 z-50">
                     {roleSession && (
                       <div className="space-y-1.5 pb-3 border-b border-slate-100 dark:border-slate-800">
                         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -380,10 +380,10 @@ export const Header: React.FC<HeaderProps> = ({
                       key={item.label}
                       type="button"
                       onClick={item.onClick}
-                      className={`w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-sm font-semibold transition-colors ${
+                      className={`w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-sm font-bold transition-colors ${
                         item.active
-                          ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
-                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900'
+                          ? 'bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-sky-50/60 dark:hover:bg-slate-900'
                       }`}
                     >
                       <Icon className="w-4 h-4 shrink-0" />
@@ -423,10 +423,10 @@ export const Header: React.FC<HeaderProps> = ({
                       key={item.label}
                       type="button"
                       onClick={item.onClick}
-                      className={`w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-sm font-semibold transition-colors ${
+                      className={`w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-sm font-bold transition-colors ${
                         item.active
-                          ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
-                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900'
+                          ? 'bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-sky-50/60 dark:hover:bg-slate-900'
                       }`}
                     >
                       <Icon className="w-4 h-4 shrink-0" />

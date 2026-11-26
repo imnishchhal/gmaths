@@ -42,18 +42,24 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
     },
   });
 
-  // Compact ergonomic >= 48px touch keys so mobile screens (360x640+) never push equations off-screen
+  // Tactile 3D toy-block keys (>= 48px touch targets) that press down satisfyingly on tap
   const digitClass =
-    'min-h-[48px] sm:min-h-[56px] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/90 active:scale-[0.96] active:bg-slate-100 dark:active:bg-slate-800 text-slate-900 dark:text-white font-mono text-xl sm:text-2xl font-semibold tabular-nums flex items-center justify-center select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
+    'min-h-[50px] sm:min-h-[58px] rounded-2xl border-2 border-b-4 border-sky-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-slate-700/90 active:border-b-2 active:translate-y-[2px] active:bg-sky-100 dark:active:bg-slate-700 text-slate-900 dark:text-white font-display text-2xl sm:text-3xl font-bold tabular-nums flex items-center justify-center select-none touch-manipulation transition-all duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500';
+
+  const backspaceClass =
+    'min-h-[50px] sm:min-h-[58px] rounded-2xl border-2 border-b-4 border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 active:border-b-2 active:translate-y-[2px] text-rose-700 dark:text-rose-300 font-bold text-sm sm:text-base flex items-center justify-center gap-1 select-none touch-manipulation transition-all duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500';
+
+  const clearClass =
+    'min-h-[50px] sm:min-h-[58px] rounded-2xl border-2 border-b-4 border-amber-200 dark:border-amber-900/70 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 active:border-b-2 active:translate-y-[2px] text-amber-800 dark:text-amber-300 font-bold text-sm sm:text-base flex items-center justify-center gap-1 select-none touch-manipulation transition-all duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500';
 
   const utilityClass =
-    'min-h-[48px] sm:min-h-[56px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200/80 dark:hover:bg-slate-800 active:scale-[0.96] text-slate-700 dark:text-slate-200 font-semibold text-sm sm:text-base flex items-center justify-center gap-1 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
+    'min-h-[50px] sm:min-h-[58px] rounded-2xl border-2 border-b-4 border-sky-200 dark:border-sky-800/80 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 active:border-b-2 active:translate-y-[2px] text-sky-800 dark:text-sky-300 font-bold text-sm sm:text-base flex items-center justify-center gap-1 select-none touch-manipulation transition-all duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500';
 
   return (
     <div
       role="group"
       aria-label="Onscreen numeric keypad"
-      className="w-full max-w-md mx-auto grid grid-cols-4 gap-1.5 sm:gap-2.5 select-none"
+      className="w-full max-w-md mx-auto grid grid-cols-4 gap-2 sm:gap-2.5 select-none"
     >
       {/* Row 1: 7 8 9 Backspace */}
       <button
@@ -83,7 +89,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       <button
         type="button"
         {...bindKey(onBackspace)}
-        className={utilityClass}
+        className={backspaceClass}
         aria-label="Backspace"
       >
         <Delete className="w-5 h-5" />
@@ -117,10 +123,10 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       <button
         type="button"
         {...bindKey(onClear)}
-        className={utilityClass}
+        className={clearClass}
         aria-label="Clear input"
       >
-        <span className="font-mono text-base sm:text-lg">C</span>
+        <span className="font-display text-lg sm:text-xl">C</span>
       </button>
 
       {/* Row 3: 1 2 3 + Tall Submit */}
@@ -151,12 +157,12 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
       <button
         type="button"
         {...bindKey(onSubmit)}
-        className="row-span-2 min-h-[48px] rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.97] active:bg-blue-800 text-white font-semibold flex flex-col items-center justify-center gap-0.5 select-none touch-manipulation transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
+        className="row-span-2 min-h-[50px] rounded-2xl bg-emerald-500 hover:bg-emerald-600 border-2 border-emerald-600 border-b-4 border-b-emerald-700 active:border-b-2 active:translate-y-[2px] active:bg-emerald-600 text-white font-display font-bold flex flex-col items-center justify-center gap-0.5 select-none touch-manipulation transition-all duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
         aria-label="Submit answer"
       >
         <CornerDownLeft className="w-5 h-5 sm:w-6 sm:h-6" />
-        <span className="text-xs font-semibold tracking-tight whitespace-nowrap">
-          Go
+        <span className="text-sm font-bold tracking-tight whitespace-nowrap">
+          Go!
         </span>
       </button>
 
@@ -169,7 +175,7 @@ export const NumericKeypad: React.FC<NumericKeypadProps> = ({
             className={utilityClass}
             aria-label="Toggle positive or negative sign"
           >
-            <span className="font-mono text-lg sm:text-xl">±</span>
+            <span className="font-display text-xl sm:text-2xl">±</span>
           </button>
           <button
             type="button"

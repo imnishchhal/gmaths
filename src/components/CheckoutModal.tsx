@@ -190,11 +190,11 @@ export const CheckoutModal: React.FC = () => {
       aria-modal="true"
       aria-labelledby="checkout-modal-title"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden my-auto">
+      <div className="w-full max-w-lg rounded-3xl border-2 border-sky-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden my-auto">
         {/* Top Modal Header */}
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3">
+        <div className="px-5 py-4 border-b-2 border-sky-100 dark:border-slate-800 flex items-start justify-between gap-3">
           <div className="space-y-0.5">
-            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-600 dark:text-sky-400">
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
               <span>Math Speedster Pro</span>
             </div>
@@ -210,7 +210,7 @@ export const CheckoutModal: React.FC = () => {
             type="button"
             onClick={closeCheckoutModal}
             aria-label="Close checkout"
-            className="min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+            className="min-h-[44px] min-w-[44px] rounded-2xl flex items-center justify-center text-slate-500 hover:bg-sky-50 dark:hover:bg-slate-800 shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -218,7 +218,7 @@ export const CheckoutModal: React.FC = () => {
 
         <div className="p-5 space-y-5 max-h-[82vh] overflow-y-auto">
           {isProSubscriber && myStudentSubscription && !successMessage && (
-            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/35 p-4 flex items-start gap-2.5 text-xs sm:text-sm text-emerald-800 dark:text-emerald-300">
+            <div className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/35 p-4 flex items-start gap-2.5 text-xs sm:text-sm text-emerald-800 dark:text-emerald-300">
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">Annual Pro is already active</p>
@@ -230,7 +230,7 @@ export const CheckoutModal: React.FC = () => {
           )}
 
           {successMessage ? (
-            <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/30 p-6 text-center space-y-4">
+            <div className="rounded-3xl border-2 border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/30 p-6 text-center space-y-4">
               <CheckCircle2 className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto" />
               <div className="space-y-1">
                 <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white">
@@ -243,7 +243,7 @@ export const CheckoutModal: React.FC = () => {
               <button
                 type="button"
                 onClick={closeCheckoutModal}
-                className="w-full min-h-[48px] px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold"
+                className="w-full min-h-[48px] px-5 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] text-white font-display text-sm sm:text-base font-bold transition-all"
               >
                 Continue Practicing
               </button>
@@ -251,8 +251,8 @@ export const CheckoutModal: React.FC = () => {
           ) : (
             <>
               {/* Included Features Summary */}
-              <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-3.5 space-y-2 text-xs text-slate-700 dark:text-slate-300">
-                <p className="font-semibold text-slate-900 dark:text-white">
+              <div className="rounded-2xl border-2 border-sky-100 dark:border-slate-800 bg-sky-50/60 dark:bg-slate-950/60 p-3.5 space-y-2 text-xs text-slate-700 dark:text-slate-300">
+                <p className="font-bold text-slate-900 dark:text-white">
                   Included in 1-Year Pro ({formatCurrency(ANNUAL_PLAN_PRICE_INR)}/year):
                 </p>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -279,7 +279,7 @@ export const CheckoutModal: React.FC = () => {
               <div
                 role="tablist"
                 aria-label="Payment or voucher activation"
-                className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800"
+                className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-sky-100/80 dark:bg-slate-950 border-2 border-sky-200/80 dark:border-slate-800"
               >
                 <button
                   type="button"
@@ -289,9 +289,9 @@ export const CheckoutModal: React.FC = () => {
                     setTab('plan');
                     setError(null);
                   }}
-                  className={`min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`min-h-[44px] px-3 py-2 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 transition-colors ${
                     tab === 'plan'
-                      ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >
@@ -306,9 +306,9 @@ export const CheckoutModal: React.FC = () => {
                     setTab('voucher');
                     setError(null);
                   }}
-                  className={`min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                  className={`min-h-[44px] px-3 py-2 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 transition-colors ${
                     tab === 'voucher'
-                      ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >
@@ -319,16 +319,16 @@ export const CheckoutModal: React.FC = () => {
 
               {/* Google Sign-In Reminder if signed out */}
               {isConfigured && !user && (
-                <div className="rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/30 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="text-xs text-blue-900 dark:text-blue-200">
-                    <p className="font-semibold">Sign in with Google to sync Pro</p>
+                <div className="rounded-2xl border-2 border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/30 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-xs text-sky-900 dark:text-sky-200">
+                    <p className="font-bold">Sign in with Google to sync Pro</p>
                     <p>Links your 1-year plan across desktop and mobile.</p>
                   </div>
                   <button
                     type="button"
                     disabled={authLoading}
                     onClick={() => void signInWithGoogle()}
-                    className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold whitespace-nowrap shrink-0"
+                    className="min-h-[44px] px-4 py-2 rounded-2xl bg-sky-500 hover:bg-sky-600 border-b-4 border-sky-700 active:border-b-0 active:translate-y-[2px] text-white text-xs font-bold whitespace-nowrap shrink-0"
                   >
                     {authLoading ? 'Connecting…' : 'Sign in with Google'}
                   </button>
@@ -336,7 +336,7 @@ export const CheckoutModal: React.FC = () => {
               )}
 
               {error && (
-                <div className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 px-3.5 py-2.5 flex items-start gap-2 text-xs sm:text-sm text-red-700 dark:text-red-300">
+                <div className="rounded-2xl border-2 border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-3.5 py-2.5 flex items-start gap-2 text-xs sm:text-sm text-rose-700 dark:text-rose-300">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -348,9 +348,9 @@ export const CheckoutModal: React.FC = () => {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="checkout-promo"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300"
                     >
-                      <Tag className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <Tag className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                       Referral / Promo Code (₹{REFERRAL_DISCOUNT_INR} Off)
                     </label>
                     <div className="flex gap-2">
@@ -362,24 +362,24 @@ export const CheckoutModal: React.FC = () => {
                           setPromoCode(e.target.value.toUpperCase())
                         }
                         placeholder="e.g. AG01"
-                        className="flex-1 min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-mono uppercase text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                        className="flex-1 min-h-[44px] px-3 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm font-mono uppercase text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                       <button
                         type="button"
                         disabled={checkingPromo}
                         onClick={() => void handleApplyPromo()}
-                        className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap"
+                        className="min-h-[44px] px-4 py-2 rounded-2xl border-2 border-sky-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap"
                       >
                         {checkingPromo ? 'Checking…' : 'Apply'}
                       </button>
                     </div>
                     {promoResult && (
                       <p
-                        className={`text-xs font-medium ${
+                        className={`text-xs font-semibold ${
                           promoResult.valid
                             ? 'text-emerald-700 dark:text-emerald-400'
                             : promoResult.isSelfReferral
-                            ? 'text-red-600 dark:text-red-400'
+                            ? 'text-rose-600 dark:text-rose-400'
                             : 'text-amber-700 dark:text-amber-400'
                         }`}
                       >
@@ -391,7 +391,7 @@ export const CheckoutModal: React.FC = () => {
                   {/* Subscriber Details */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Student / Parent Name *
                       </label>
                       <input
@@ -400,11 +400,11 @@ export const CheckoutModal: React.FC = () => {
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="e.g. Aarav Sharma"
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Mobile Number *
                       </label>
                       <input
@@ -413,13 +413,13 @@ export const CheckoutModal: React.FC = () => {
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                         placeholder="10-digit mobile"
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                       Google Email *
                     </label>
                     <input
@@ -428,13 +428,13 @@ export const CheckoutModal: React.FC = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@gmail.com"
-                      className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                      className="w-full min-h-[44px] px-3 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
 
                   {/* Payment Method */}
                   <div className="space-y-1.5">
-                    <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <span className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                       Payment Mode
                     </span>
                     <div className="grid grid-cols-2 gap-2">
@@ -448,10 +448,10 @@ export const CheckoutModal: React.FC = () => {
                           key={pm.id}
                           type="button"
                           onClick={() => setPaymentMethod(pm.id)}
-                          className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${
+                          className={`min-h-[44px] px-3 py-2 rounded-2xl border-2 text-xs font-bold transition-colors ${
                             paymentMethod === pm.id
-                              ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
-                              : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300'
+                              : 'border-sky-100 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           {pm.label}
@@ -461,9 +461,9 @@ export const CheckoutModal: React.FC = () => {
                   </div>
 
                   {/* Order Summary & Submit */}
-                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-3.5 flex items-center justify-between gap-3">
+                  <div className="rounded-2xl border-2 border-sky-100 dark:border-slate-800 bg-sky-50/50 dark:bg-slate-950/60 p-3.5 flex items-center justify-between gap-3">
                     <div className="text-xs text-slate-600 dark:text-slate-400">
-                      <span className="block font-semibold text-slate-900 dark:text-white">
+                      <span className="block font-bold text-slate-900 dark:text-white">
                         Annual Pro Total
                       </span>
                       {discount > 0 ? (
@@ -475,7 +475,7 @@ export const CheckoutModal: React.FC = () => {
                         <span>1 year · non-recurring</span>
                       )}
                     </div>
-                    <span className="font-mono text-xl font-bold text-slate-950 dark:text-white tabular-nums">
+                    <span className="font-display text-2xl font-bold text-slate-950 dark:text-white tabular-nums">
                       {formatCurrency(finalAmount)}
                     </span>
                   </div>
@@ -483,7 +483,7 @@ export const CheckoutModal: React.FC = () => {
                   <button
                     type="submit"
                     disabled={submitting || (isConfigured && !user)}
-                    className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+                    className="w-full min-h-[48px] px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white font-display text-sm sm:text-base font-bold inline-flex items-center justify-center gap-2 transition-all"
                   >
                     <Lock className="w-4 h-4 shrink-0" />
                     {submitting
@@ -496,7 +496,7 @@ export const CheckoutModal: React.FC = () => {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="voucher-code-input"
-                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                      className="block text-xs font-bold text-slate-700 dark:text-slate-300"
                     >
                       Offline Cash Activation Voucher *
                     </label>
@@ -509,7 +509,7 @@ export const CheckoutModal: React.FC = () => {
                         setVoucherCode(e.target.value.toUpperCase())
                       }
                       placeholder="GM-XXXXXX"
-                      className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-base font-mono uppercase tracking-wider text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      className="w-full min-h-[48px] px-3.5 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-base font-mono uppercase tracking-wider text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Enter the 1-year voucher code received from an authorized
@@ -519,7 +519,7 @@ export const CheckoutModal: React.FC = () => {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Student / Parent Name
                       </label>
                       <input
@@ -527,11 +527,11 @@ export const CheckoutModal: React.FC = () => {
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="Optional"
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Mobile Number
                       </label>
                       <input
@@ -539,7 +539,7 @@ export const CheckoutModal: React.FC = () => {
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                         placeholder="Optional"
-                        className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
+                        className="w-full min-h-[44px] px-3 py-2 rounded-2xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                     </div>
                   </div>
@@ -547,7 +547,7 @@ export const CheckoutModal: React.FC = () => {
                   <button
                     type="submit"
                     disabled={submitting || (isConfigured && !user)}
-                    className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+                    className="w-full min-h-[48px] px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 border-b-4 border-emerald-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white font-display text-sm sm:text-base font-bold inline-flex items-center justify-center gap-2 transition-all"
                   >
                     <Ticket className="w-4 h-4 shrink-0" />
                     {submitting ? 'Redeeming Voucher…' : 'Activate 1-Year Voucher'}

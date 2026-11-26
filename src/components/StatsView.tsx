@@ -90,7 +90,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-8">
-      <div className="pb-6 border-b border-slate-200 dark:border-slate-800 space-y-1">
+      <div className="pb-6 border-b-2 border-sky-100 dark:border-slate-800 space-y-1">
         <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white">
           Performance Stats
         </h1>
@@ -101,8 +101,8 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
       </div>
 
       {!summary ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center space-y-4">
-          <p className="text-base font-semibold text-slate-900 dark:text-white">
+        <div className="rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-10 text-center space-y-4">
+          <p className="font-display text-lg font-bold text-slate-950 dark:text-white">
             Complete your first drill to unlock analytics
           </p>
           <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
@@ -112,7 +112,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
           <button
             type="button"
             onClick={onStartDrill}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+            className="inline-flex items-center gap-2 min-h-[48px] px-6 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] text-white font-display text-sm sm:text-base font-bold transition-all whitespace-nowrap"
           >
             <Play className="w-4 h-4 fill-current" />
             Start First Sprint
@@ -122,11 +122,11 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
         <>
           {/* Lifetime KPI Strip */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-1">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div className="rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-sky-50/70 dark:bg-slate-900 p-5 space-y-1">
+              <span className="text-xs font-bold text-sky-700 dark:text-sky-300">
                 Total Solved
               </span>
-              <p className="font-mono text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
+              <p className="font-display text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
                 {summary.totalCorrect}
               </p>
               <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
@@ -135,11 +135,11 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
               </span>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-1">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div className="rounded-3xl border-2 border-emerald-200 dark:border-slate-700/80 bg-emerald-50/70 dark:bg-slate-900 p-5 space-y-1">
+              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
                 Lifetime Accuracy
               </span>
-              <p className="font-mono text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
+              <p className="font-display text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
                 {summary.lifetimeAccuracy.toFixed(1)}%
               </p>
               <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
@@ -147,11 +147,11 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
               </span>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-1">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div className="rounded-3xl border-2 border-amber-200 dark:border-slate-700/80 bg-amber-50/70 dark:bg-slate-900 p-5 space-y-1">
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-300">
                 Longest Streak
               </span>
-              <p className="font-mono text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
+              <p className="font-display text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
                 {summary.longestStreak}
               </p>
               <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -159,11 +159,11 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
               </span>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-1">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div className="rounded-3xl border-2 border-violet-200 dark:border-slate-700/80 bg-violet-50/70 dark:bg-slate-900 p-5 space-y-1">
+              <span className="text-xs font-bold text-violet-700 dark:text-violet-300">
                 Mean Response
               </span>
-              <p className="font-mono text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
+              <p className="font-display text-3xl font-bold text-slate-950 dark:text-white tabular-nums">
                 {(summary.overallAvgMs / 1000).toFixed(2)}s
               </p>
               <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
@@ -175,9 +175,9 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
           {/* Operation Breakdown & Mixed Sprint Matrix (Pro Gated) */}
           {isProSubscriber ? (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              <section className="lg:col-span-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 space-y-5">
+              <section className="lg:col-span-6 rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-5 sm:p-6 space-y-5">
                 <div>
-                  <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white">
+                  <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
                     Breakdown by Operation
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -189,7 +189,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                   {byMode.map((row) => (
                     <div key={row.mode} className="space-y-1.5">
                       <div className="flex items-baseline justify-between gap-2 text-sm">
-                        <span className="font-semibold text-slate-900 dark:text-white">
+                        <span className="font-bold text-slate-900 dark:text-white">
                           {MODE_META[row.mode].label}
                         </span>
                         <span className="font-mono text-xs text-slate-600 dark:text-slate-400 tabular-nums">
@@ -198,9 +198,9 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                             : 'No runs yet'}
                         </span>
                       </div>
-                      <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div className="h-2.5 rounded-full bg-sky-100 dark:bg-slate-800 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
+                          className="h-full rounded-full bg-sky-500 dark:bg-sky-400 transition-all duration-300"
                           style={{
                             width: `${row.runs > 0 ? Math.max(4, row.accuracy) : 0}%`,
                           }}
@@ -211,9 +211,9 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                 </div>
               </section>
 
-              <section className="lg:col-span-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 space-y-5">
+              <section className="lg:col-span-6 rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-5 sm:p-6 space-y-5">
                 <div>
-                  <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white">
+                  <h2 className="font-display text-lg font-bold text-slate-950 dark:text-white">
                     Mixed Mode Personal Bests
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -224,7 +224,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <tr className="border-b-2 border-sky-100 dark:border-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400">
                         <th className="py-2 pr-3">Difficulty</th>
                         <th className="py-2 px-3 text-right">30s</th>
                         <th className="py-2 px-3 text-right">60s</th>
@@ -232,7 +232,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                         <th className="py-2 pl-3 text-right">Streak</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
+                    <tbody className="divide-y divide-sky-100/70 dark:divide-slate-800 text-sm">
                       {DIFFICULTIES.map((diff) => {
                         const b30 = personalBests[getPresetKey('mixed', diff, 'sprint', 30)];
                         const b60 = personalBests[getPresetKey('mixed', diff, 'sprint', 60)];
@@ -240,19 +240,19 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                         const bSt = personalBests[getPresetKey('mixed', diff, 'streak', 0)];
                         return (
                           <tr key={diff}>
-                            <td className="py-3 pr-3 font-semibold text-slate-900 dark:text-white">
+                            <td className="py-3 pr-3 font-bold text-slate-900 dark:text-white">
                               {DIFFICULTY_META[diff].label}
                             </td>
-                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 dark:text-white tabular-nums">
+                            <td className="py-3 px-3 text-right font-display text-base font-bold text-slate-950 dark:text-white tabular-nums">
                               {b30 ? b30.score : '—'}
                             </td>
-                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 dark:text-white tabular-nums">
+                            <td className="py-3 px-3 text-right font-display text-base font-bold text-slate-950 dark:text-white tabular-nums">
                               {b60 ? b60.score : '—'}
                             </td>
-                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-900 dark:text-white tabular-nums">
+                            <td className="py-3 px-3 text-right font-display text-base font-bold text-slate-950 dark:text-white tabular-nums">
                               {b90 ? b90.score : '—'}
                             </td>
-                            <td className="py-3 pl-3 text-right font-mono font-bold text-slate-900 dark:text-white tabular-nums">
+                            <td className="py-3 pl-3 text-right font-display text-base font-bold text-slate-950 dark:text-white tabular-nums">
                               {bSt ? bSt.score : '—'}
                             </td>
                           </tr>
@@ -264,7 +264,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
               </section>
             </div>
           ) : (
-            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <section className="rounded-3xl border-2 border-amber-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 shadow-[0_6px_0_0_rgba(253,230,138,0.45)] dark:shadow-none p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="space-y-2 max-w-xl">
                 <div className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
                   <Lock className="w-4 h-4 shrink-0" />
@@ -283,7 +283,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                 <button
                   type="button"
                   onClick={() => openCheckoutModal('plan')}
-                  className="min-h-[48px] px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold inline-flex items-center gap-2 whitespace-nowrap"
+                  className="min-h-[48px] px-5 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] text-white font-display text-sm sm:text-base font-bold inline-flex items-center gap-2 transition-all whitespace-nowrap"
                 >
                   <Sparkles className="w-4 h-4 shrink-0" />
                   Unlock Annual Pro
@@ -291,7 +291,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ onStartDrill }) => {
                 <button
                   type="button"
                   onClick={() => openCheckoutModal('voucher')}
-                  className="min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap"
+                  className="min-h-[48px] px-4 py-2.5 rounded-2xl border-2 border-sky-200 dark:border-slate-700 bg-sky-50/70 dark:bg-slate-800 hover:bg-sky-100 dark:hover:bg-slate-700 text-sky-800 dark:text-slate-100 text-sm font-bold inline-flex items-center gap-2 whitespace-nowrap"
                 >
                   <Ticket className="w-4 h-4 shrink-0" />
                   Cash Voucher

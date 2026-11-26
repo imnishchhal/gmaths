@@ -70,7 +70,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6">
       {/* Header Row */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b-2 border-sky-100 dark:border-slate-800">
         <div className="space-y-1">
           <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white">
             Session History
@@ -89,7 +89,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               type="button"
               disabled={syncingCount > 0}
               onClick={() => void handleSync()}
-              className="inline-flex items-center gap-2 min-h-[40px] px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-2xl bg-sky-500 hover:bg-sky-600 border-b-4 border-sky-700 active:border-b-0 active:translate-y-[2px] disabled:opacity-50 text-white text-xs sm:text-sm font-bold transition-all whitespace-nowrap shrink-0"
             >
               <CloudUpload className="w-4 h-4" />
               Sync {localOnlySessions.length} Local{' '}
@@ -101,7 +101,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <button
               type="button"
               onClick={() => setConfirmClear(true)}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-2xl border-2 border-sky-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-sky-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 transition-colors whitespace-nowrap shrink-0"
             >
               Clear Local
             </button>
@@ -109,7 +109,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
           {confirmClear && (
             <div className="inline-flex items-center gap-2 text-xs">
-              <span className="text-slate-600 dark:text-slate-300 font-medium">
+              <span className="text-slate-600 dark:text-slate-300 font-semibold">
                 Remove local runs?
               </span>
               <button
@@ -118,14 +118,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   clearAllLocalSessions();
                   setConfirmClear(false);
                 }}
-                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold whitespace-nowrap"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold whitespace-nowrap"
               >
                 Confirm
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmClear(false)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold whitespace-nowrap"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl border-2 border-sky-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold whitespace-nowrap"
               >
                 Cancel
               </button>
@@ -135,23 +135,23 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       </div>
 
       {syncMessage && (
-        <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
           {syncMessage}
         </p>
       )}
 
       {/* Interactive Filter Controls */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-1 p-1 rounded-2xl bg-sky-100/80 dark:bg-slate-900 border-2 border-sky-200/80 dark:border-slate-800 w-full sm:w-auto">
           {(['all', 'mixed', 'addition', 'subtraction', 'multiplication', 'division'] as const).map(
             (m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setModeFilter(m)}
-                className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex-1 sm:flex-initial ${
+                className={`min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex-1 sm:flex-initial ${
                   modeFilter === m
-                    ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
                 }`}
               >
@@ -161,15 +161,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 w-full sm:w-auto">
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-sky-100/80 dark:bg-slate-900 border-2 border-sky-200/80 dark:border-slate-800 w-full sm:w-auto">
           {(['all', 'easy', 'medium', 'hard'] as const).map((d) => (
             <button
               key={d}
               type="button"
               onClick={() => setDiffFilter(d)}
-              className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex-1 sm:flex-initial ${
+              className={`min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex-1 sm:flex-initial ${
                 diffFilter === d
-                  ? 'bg-white dark:bg-slate-800 text-slate-950 dark:text-white shadow-sm'
+                  ? 'bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
               }`}
             >
@@ -181,8 +181,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
       {/* Runs List (Mobile Cards < md, Desktop Table >= md) */}
       {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center space-y-4">
-          <p className="text-base font-semibold text-slate-900 dark:text-white">
+        <div className="rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-10 text-center space-y-4">
+          <p className="font-display text-lg font-bold text-slate-950 dark:text-white">
             {sessions.length === 0
               ? 'No completed drills yet'
               : 'No runs match these filters'}
@@ -196,7 +196,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <button
               type="button"
               onClick={onStartNewDrill}
-              className="inline-flex items-center gap-2 min-h-[44px] px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-2 min-h-[48px] px-6 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 border-b-4 border-orange-700 active:border-b-0 active:translate-y-[2px] text-white font-display text-sm sm:text-base font-bold transition-all whitespace-nowrap"
             >
               <Play className="w-4 h-4 fill-current" />
               Start a Drill
@@ -210,11 +210,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             {filtered.map((run) => (
               <article
                 key={run.id}
-                className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3"
+                className="rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-950 dark:text-white truncate">
+                    <p className="font-display text-base font-bold text-slate-950 dark:text-white truncate">
                       {formatSessionDescriptor(
                         run.mode,
                         run.difficulty,
@@ -230,50 +230,50 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="font-mono text-xl font-bold text-slate-950 dark:text-white tabular-nums pr-1">
+                    <span className="font-display text-2xl font-bold text-slate-950 dark:text-white tabular-nums pr-1">
                       {run.score}
                     </span>
                     <button
                       type="button"
                       onClick={() => void removeSession(run)}
                       aria-label="Delete session"
-                      className="min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      className="min-h-[44px] min-w-[44px] rounded-2xl flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 pt-2.5 border-t border-slate-100 dark:border-slate-800 font-mono text-xs tabular-nums">
+                <div className="grid grid-cols-4 gap-2 pt-2.5 border-t-2 border-sky-50 dark:border-slate-800 font-mono text-xs tabular-nums">
                   <div>
-                    <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="block font-sans text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Acc
                     </span>
-                    <span className="font-semibold text-slate-900 dark:text-white">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       {run.accuracy.toFixed(0)}%
                     </span>
                   </div>
                   <div>
-                    <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="block font-sans text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Streak
                     </span>
-                    <span className="font-semibold text-slate-900 dark:text-white">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       {run.bestStreak}
                     </span>
                   </div>
                   <div>
-                    <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="block font-sans text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Avg
                     </span>
-                    <span className="font-semibold text-slate-900 dark:text-white">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       {(run.avgResponseMs / 1000).toFixed(2)}s
                     </span>
                   </div>
                   <div>
-                    <span className="block font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="block font-sans text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Q/Min
                     </span>
-                    <span className="font-semibold text-slate-900 dark:text-white">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       {run.qpm.toFixed(1)}
                     </span>
                   </div>
@@ -283,11 +283,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </div>
 
           {/* Desktop Table */}
-          <div className="hidden md:block rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <div className="hidden md:block rounded-3xl border-2 border-sky-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/70 dark:bg-slate-950/40">
+                  <tr className="border-b-2 border-sky-100 dark:border-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400 bg-sky-50/70 dark:bg-slate-950/40">
                     <th className="py-3 px-4">Date</th>
                     <th className="py-3 px-4">Drill</th>
                     <th className="py-3 px-4 text-right">Score</th>
@@ -301,16 +301,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
+                <tbody className="divide-y divide-sky-100/70 dark:divide-slate-800 text-sm">
                   {filtered.map((run) => (
                     <tr
                       key={run.id}
-                      className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
+                      className="hover:bg-sky-50/50 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       <td className="py-3.5 px-4 text-xs text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
                         {formatTimestamp(run.createdAtMs)}
                       </td>
-                      <td className="py-3.5 px-4 font-medium text-slate-900 dark:text-white whitespace-nowrap">
+                      <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
                         {formatSessionDescriptor(
                           run.mode,
                           run.difficulty,
@@ -319,7 +319,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           run.grade
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-950 dark:text-white tabular-nums whitespace-nowrap">
+                      <td className="py-3.5 px-4 text-right font-display text-base font-bold text-slate-950 dark:text-white tabular-nums whitespace-nowrap">
                         {run.score}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums whitespace-nowrap">
@@ -336,7 +336,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       </td>
                       <td className="py-3.5 px-4 text-right text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
                         {run.source === 'cloud' ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                          <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400">
                             <Cloud className="w-3.5 h-3.5" />
                             Cloud
                           </span>
@@ -352,7 +352,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           type="button"
                           onClick={() => void removeSession(run)}
                           aria-label="Delete session"
-                          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

@@ -1800,9 +1800,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       try {
-        await cloudUpdateParentPassword(parentId, nextPwd, nextHash);
-
         const phoneDigits = normalizePhoneDigits(target.contact);
+        const backfillAuthEmail =
+          !target.authEmail && phoneDigits.length >= 7
+            ? buildParentAuthEmail(phoneDigits)
+            : undefined;
+        await cloudUpdateParentPassword(
+          parentId,
+          nextPwd,
+          nextHash,
+          backfillAuthEmail
+        );
+
         if (target.password && target.password !== nextPwd && phoneDigits.length >= 7) {
           await cloudDeletePortalLogin('parent', phoneDigits, target.password);
         }

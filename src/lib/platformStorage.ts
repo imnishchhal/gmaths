@@ -1653,16 +1653,19 @@ export async function cloudCreateParent(
 export async function cloudUpdateParentPassword(
   parentId: string,
   password: string,
-  passcodeHash: string
+  passcodeHash: string,
+  authEmail?: string
 ): Promise<void> {
   if (!db) throw new Error('Cloud Firestore is not initialized.');
   const firestore = db;
   const id = sanitizeId(parentId, 'par');
   const path = `parents/${id}`;
+  const cleanAuthEmail = authEmail ? sanitizeEmail(authEmail) : '';
   try {
     await updateDoc(doc(firestore, 'parents', id), {
       password: password.slice(0, 128),
       passcodeHash: sanitizeHash(passcodeHash),
+      ...(cleanAuthEmail ? { authEmail: cleanAuthEmail } : {}),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

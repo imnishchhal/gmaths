@@ -81,19 +81,19 @@ service cloud.firestore {
 
     function isAgentRecordAuthorized(data) {
       return isAuthorizedAppUser() && (
-        data.ownerUid == request.auth.uid
-        || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
-        || matchesAgentEmail(data.email)
+        ('ownerUid' in data && data.ownerUid == request.auth.uid)
+        || (isAdmin() && (!('workspaceId' in data) || data.workspaceId == 'gmaths_main'))
+        || ('email' in data && matchesAgentEmail(data.email))
         || (isPhoneAgentAuth() && 'phone' in data && data.phone is string && data.phone == phoneAuthDigits())
       );
     }
 
     function isParentRecordAuthorized(data) {
       return isAuthorizedAppUser() && (
-        data.ownerUid == request.auth.uid
-        || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
-        || matchesAgentEmail(data.agentEmail)
-        || matchesParentEmail(data.email)
+        ('ownerUid' in data && data.ownerUid == request.auth.uid)
+        || (isAdmin() && (!('workspaceId' in data) || data.workspaceId == 'gmaths_main'))
+        || ('agentEmail' in data && matchesAgentEmail(data.agentEmail))
+        || ('email' in data && matchesParentEmail(data.email))
         || ('authEmail' in data && matchesParentEmail(data.authEmail))
         || (isPhoneAgentAuth() && 'agentPhone' in data && data.agentPhone is string && data.agentPhone == phoneAuthDigits())
         || (isPhoneParentAuth() && 'contact' in data && data.contact is string && data.contact == phoneAuthDigits())
@@ -102,10 +102,10 @@ service cloud.firestore {
 
     function isFamilyScopedAuthorized(data) {
       return isAuthorizedAppUser() && (
-        data.ownerUid == request.auth.uid
-        || (isBootstrappedAdmin() && data.workspaceId == 'gmaths_main')
-        || matchesAgentEmail(data.agentEmail)
-        || matchesParentEmail(data.parentEmail)
+        ('ownerUid' in data && data.ownerUid == request.auth.uid)
+        || (isAdmin() && (!('workspaceId' in data) || data.workspaceId == 'gmaths_main'))
+        || ('agentEmail' in data && matchesAgentEmail(data.agentEmail))
+        || ('parentEmail' in data && matchesParentEmail(data.parentEmail))
         || ('parentAuthEmail' in data && matchesParentEmail(data.parentAuthEmail))
       );
     }
@@ -783,18 +783,32 @@ service cloud.firestore {
 
       allow update: if isAuthorizedAppUser()
         && isValidId(agentId)
-        && isValidAgentProfile(incoming(), agentId)
         && isAgentRecordAuthorized(existing())
-        && incoming().id == existing().id
-        && incoming().workspaceId == existing().workspaceId
-        && incoming().ownerUid == existing().ownerUid
-        && incoming().createdAt == existing().createdAt
+        && (!('id' in existing()) || incoming().id == existing().id)
+        && (!('workspaceId' in existing()) || incoming().workspaceId == existing().workspaceId)
+        && (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid)
+        && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
         && incoming().updatedAt == request.time
         && (
-          isAdmin()
-          || incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'phone', 'assignedArea', 'city', 'upiId', 'passcodeHash', 'password', 'updatedAt'
-          ])
+          (
+            isValidAgentProfile(incoming(), agentId)
+            && (
+              isAdmin()
+              || incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'phone', 'assignedArea', 'city', 'upiId', 'passcodeHash', 'password', 'updatedAt'
+              ])
+            )
+          )
+          ||
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'password', 'passcodeHash', 'updatedAt'
+            ])
+            && incoming().passcodeHash is string
+            && incoming().passcodeHash.size() >= 16
+            && incoming().passcodeHash.size() <= 128
+            && (!('password' in incoming()) || (incoming().password is string && incoming().password.size() <= 128))
+          )
         );
 
       allow delete: if isAuthorizedAppUser()
@@ -851,20 +865,35 @@ service cloud.firestore {
 
       allow update: if isAuthorizedAppUser()
         && isValidId(parentId)
-        && isValidParentProfile(incoming(), parentId)
         && isParentRecordAuthorized(existing())
-        && incoming().id == existing().id
-        && incoming().workspaceId == existing().workspaceId
-        && incoming().ownerUid == existing().ownerUid
-        && incoming().createdByAgentId == existing().createdByAgentId
-        && incoming().createdAt == existing().createdAt
+        && (!('id' in existing()) || incoming().id == existing().id)
+        && (!('workspaceId' in existing()) || incoming().workspaceId == existing().workspaceId)
+        && (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid)
+        && (!('createdByAgentId' in existing()) || incoming().createdByAgentId == existing().createdByAgentId)
+        && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
         && incoming().updatedAt == request.time
         && (
-          isAdmin()
-          || incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'contact', 'email', 'authEmail', 'passcodeHash', 'password',
-            'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt'
-          ])
+          (
+            isValidParentProfile(incoming(), parentId)
+            && (
+              isAdmin()
+              || incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'contact', 'email', 'authEmail', 'passcodeHash', 'password',
+                'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt'
+              ])
+            )
+          )
+          ||
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'password', 'passcodeHash', 'authEmail', 'updatedAt'
+            ])
+            && incoming().passcodeHash is string
+            && incoming().passcodeHash.size() >= 16
+            && incoming().passcodeHash.size() <= 128
+            && (!('password' in incoming()) || (incoming().password is string && incoming().password.size() <= 128))
+            && (!('authEmail' in incoming()) || (incoming().authEmail is string && incoming().authEmail.size() <= 120))
+          )
         );
 
       allow delete: if isAuthorizedAppUser()

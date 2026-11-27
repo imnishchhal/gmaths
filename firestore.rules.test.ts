@@ -118,6 +118,24 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       createdAt: SERVER_TIME,
       updatedAt: SERVER_TIME,
     },
+    par_legacy: {
+      id: 'par_legacy',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'phone_ag_uid',
+      name: 'raja',
+      contact: '9876543211',
+      email: '',
+      passcodeHash: 'y'.repeat(64),
+      createdByAgentId: 'ag_phone',
+      agentEmail: 'agent.9876501234@gmaths.local',
+      agentName: 'Phone Agent',
+      agentPhone: '98',
+      agentArea: '',
+      agentCode: '',
+      pinHash: 'legacy_field',
+      createdAt: SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    },
   },
   children: {
     ch_1: {
@@ -386,11 +404,11 @@ function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): bo
 function isParentRecordAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
   if (!isAuthorizedAppUser(auth)) return false;
   return (
-    data.ownerUid === auth!.uid ||
-    (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    matchesAgentEmail(auth, data.agentEmail) ||
-    matchesParentEmail(auth, data.email) ||
-    matchesParentEmail(auth, data.authEmail) ||
+    ('ownerUid' in data && data.ownerUid === auth!.uid) ||
+    (isBootstrappedAdmin(auth) && (!('workspaceId' in data) || data.workspaceId === 'gmaths_main')) ||
+    ('agentEmail' in data && matchesAgentEmail(auth, data.agentEmail)) ||
+    ('email' in data && matchesParentEmail(auth, data.email)) ||
+    ('authEmail' in data && matchesParentEmail(auth, data.authEmail)) ||
     (isPhoneAgentAuth(auth) && typeof data.agentPhone === 'string' && data.agentPhone === phoneAuthDigits(auth)) ||
     (isPhoneParentAuth(auth) && typeof data.contact === 'string' && data.contact === phoneAuthDigits(auth))
   );
@@ -485,12 +503,36 @@ function evaluateRule(
     if (op === 'update' && incoming && existing) {
       if (!isAuthorizedAppUser(auth) || !isValidId(docId)) return 'PERMISSION_DENIED';
       if (!isParentRecordAuthorized(auth, existing)) return 'PERMISSION_DENIED';
+      if (incoming.updatedAt !== SERVER_TIME) return 'PERMISSION_DENIED';
       const diffKeys = Object.keys(incoming).filter((k) => incoming[k] !== existing[k]);
+      const isPasswordOnly =
+        diffKeys.every((k) => ['password', 'passcodeHash', 'authEmail', 'updatedAt'].includes(k)) &&
+        typeof incoming.passcodeHash === 'string' &&
+        incoming.passcodeHash.length >= 16 &&
+        incoming.passcodeHash.length <= 128;
+      if (isPasswordOnly) return 'ALLOW';
+      const req = [
+        'id', 'workspaceId', 'ownerUid', 'name', 'contact', 'email', 'passcodeHash',
+        'createdByAgentId', 'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode',
+        'createdAt', 'updatedAt',
+      ];
+      const allowed = [...req, 'authEmail', 'password'];
+      const validProfile =
+        hasAllowedKeys(incoming, req, allowed) &&
+        typeof incoming.agentArea === 'string' &&
+        incoming.agentArea.length >= 1 &&
+        typeof incoming.agentPhone === 'string' &&
+        incoming.agentPhone.length >= 3 &&
+        typeof incoming.agentCode === 'string' &&
+        incoming.agentCode.length >= 2;
+      if (!validProfile) return 'PERMISSION_DENIED';
       const allowedDiff = [
         'name', 'contact', 'email', 'authEmail', 'passcodeHash', 'password',
         'agentEmail', 'agentName', 'agentPhone', 'agentArea', 'agentCode', 'updatedAt',
       ];
-      return diffKeys.every((k) => allowedDiff.includes(k)) ? 'ALLOW' : 'PERMISSION_DENIED';
+      return isBootstrappedAdmin(auth) || diffKeys.every((k) => allowedDiff.includes(k))
+        ? 'ALLOW'
+        : 'PERMISSION_DENIED';
     }
   }
 
@@ -1121,7 +1163,7 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
         ...dbState.parents.par_phone,
         password: 'newparentpass99',
         passcodeHash: 'z'.repeat(64),
-        updatedAt: SERVER_TIME + 1,
+        updatedAt: SERVER_TIME,
       });
       const agCreatePar = evaluateRule(agAuth, 'parents', 'create', 'par_new2', {
         ...dbState.parents.par_phone,
@@ -1133,6 +1175,41 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
       });
       return parUpdate === 'ALLOW' && agCreatePar === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
     },
+  },
+  {
+    name: 'DD-27 Unrelated User Cannot Reset Legacy Parent Password',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'attacker_uid', email: 'attacker@example.com', email_verified: true },
+        'parents',
+        'update',
+        'par_legacy',
+        {
+          ...dbState.parents.par_legacy,
+          password: 'hacked',
+          passcodeHash: 'z'.repeat(64),
+          updatedAt: SERVER_TIME,
+        }
+      ),
+  },
+  {
+    name: 'VALID-15 Admin Resets Password & Backfills authEmail on Legacy Parent Doc',
+    expected: 'ALLOW',
+    run: () =>
+      evaluateRule(
+        { uid: 'RGwP5YJ1kKSAMxSGss0D37eZPA13', email: BOOTSTRAPPED_ADMIN, email_verified: true },
+        'parents',
+        'update',
+        'par_legacy',
+        {
+          ...dbState.parents.par_legacy,
+          password: 'raja1234',
+          passcodeHash: 'z'.repeat(64),
+          authEmail: 'parent.9876543211@gmaths.local',
+          updatedAt: SERVER_TIME,
+        }
+      ),
   },
   {
     name: 'DD-25 PortalLogin List & Short Token Get Blocked',

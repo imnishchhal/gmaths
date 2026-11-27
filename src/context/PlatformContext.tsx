@@ -2056,6 +2056,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             }
           }
           if (resolved.session && resolved.session.role === 'agent') {
+            if (resolved.agentDoc && !resolved.agentDoc.password) {
+              const fallbackHash =
+                resolved.agentDoc.passcodeHash || (await hashSecret(cand));
+              await cloudUpdateAgentPassword(
+                resolved.agentDoc.id,
+                cand,
+                fallbackHash
+              ).catch(() => {});
+            }
             await cloudSyncPortalLogin(authOutcome.user, {
               role: 'agent',
               accountId: resolved.session.accountId,
@@ -2095,13 +2104,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
               error: 'Your Agent account has been suspended by Admin.',
             };
           }
-          const valid = await verifyDocPassword(loadedMatch, candidates);
-          if (valid) {
+          let matchedCand: string | null = null;
+          for (const cand of candidates) {
+            if (await verifyDocPassword(loadedMatch, [cand])) {
+              matchedCand = cand;
+              break;
+            }
+          }
+          if (matchedCand) {
+            if (!loadedMatch.password) {
+              const fallbackHash =
+                loadedMatch.passcodeHash || (await hashSecret(matchedCand));
+              await cloudUpdateAgentPassword(
+                loadedMatch.id,
+                matchedCand,
+                fallbackHash
+              ).catch(() => {});
+            }
             await cloudSyncPortalLogin(user, {
               role: 'agent',
               accountId: loadedMatch.id,
               phone: phoneDigits,
-              password: loadedMatch.password || candidates[0],
+              password: loadedMatch.password || matchedCand,
               displayName: loadedMatch.name,
               legacyAuthEmail: loadedMatch.email,
             }).catch(() => {});
@@ -2280,6 +2304,22 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             }
           }
           if (resolved.session && resolved.session.role === 'parent') {
+            if (
+              resolved.parentDoc &&
+              (!resolved.parentDoc.password || !resolved.parentDoc.authEmail)
+            ) {
+              const fallbackHash =
+                resolved.parentDoc.passcodeHash || (await hashSecret(cand));
+              const backfillEmail = !resolved.parentDoc.authEmail
+                ? buildParentAuthEmail(phoneDigits)
+                : undefined;
+              await cloudUpdateParentPassword(
+                resolved.parentDoc.id,
+                resolved.parentDoc.password || cand,
+                fallbackHash,
+                backfillEmail
+              ).catch(() => {});
+            }
             await cloudSyncPortalLogin(authOutcome.user, {
               role: 'parent',
               accountId: resolved.session.accountId,
@@ -2314,13 +2354,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           (p) => normalizePhoneDigits(p.contact) === phoneDigits
         );
         if (legacyMatch) {
-          const valid = await verifyDocPassword(legacyMatch, candidates);
-          if (valid) {
+          let matchedCand: string | null = null;
+          for (const cand of candidates) {
+            if (await verifyDocPassword(legacyMatch, [cand])) {
+              matchedCand = cand;
+              break;
+            }
+          }
+          if (matchedCand) {
+            if (!legacyMatch.password || !legacyMatch.authEmail) {
+              const fallbackHash =
+                legacyMatch.passcodeHash || (await hashSecret(matchedCand));
+              const backfillEmail = !legacyMatch.authEmail
+                ? buildParentAuthEmail(phoneDigits)
+                : undefined;
+              await cloudUpdateParentPassword(
+                legacyMatch.id,
+                legacyMatch.password || matchedCand,
+                fallbackHash,
+                backfillEmail
+              ).catch(() => {});
+            }
             await cloudSyncPortalLogin(user, {
               role: 'parent',
               accountId: legacyMatch.id,
               phone: phoneDigits,
-              password: legacyMatch.password || candidates[0],
+              password: legacyMatch.password || matchedCand,
               displayName: legacyMatch.name,
               legacyAuthEmail:
                 legacyMatch.authEmail || buildParentAuthEmail(phoneDigits),

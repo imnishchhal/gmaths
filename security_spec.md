@@ -2,11 +2,11 @@
 
 ## 1. Data Invariants
 1. **Default-Deny Catch-All**: No unmatched collection or path is readable or writable.
-2. **Authenticated Identity**: Writes across `/users`, `/agents`, `/referralCodes`, `/parents`, `/children`, `/childLeaderboard`, `/subscriptions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`, and `/practiceSessions` require either a verified Google identity (`email_verified == true`) OR synthetic Firebase Password auth for field Agents (`^agent\.[0-9]{7,15}@gmaths\.local$`) or Parents (`^parent\.[0-9]{7,15}@gmaths\.local$`).
+2. **Authenticated Identity**: Writes across `/users`, `/agents`, `/referralCodes`, `/parents`, `/children`, `/childLeaderboard`, `/subscriptions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`, `/practiceSessions`, and `/portalLogin` require either a verified Google identity (`email_verified == true`) OR synthetic Firebase Password auth for field Agents (`^agent\.[0-9]{7,15}(\.[a-f0-9]{6,16})?@gmaths\.local$`) or Parents (`^parent\.[0-9]{7,15}(\.[a-f0-9]{6,16})?@gmaths\.local$`).
 3. **Cross-Device Role Isolation Without `get()` in `list` Queries**:
    - **Admin** (`kumarnishchhal175@gmail.com` verified or `/admins/{uid}`): full workspace access (`workspaceId == 'gmaths_main'`). Admin privilege strictly requires `email_verified == true`.
-   - **Agent**: scoped via `resource.data.email == request.auth.token.email` (on `/agents`) and `resource.data.agentEmail == request.auth.token.email` (on `/parents`, `/children`, `/subscriptions`, `/practiceSessions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`).
-   - **Parent**: scoped via `resource.data.email == request.auth.token.email || resource.data.authEmail == request.auth.token.email` (on `/parents`) and `resource.data.parentEmail == request.auth.token.email || resource.data.parentAuthEmail == request.auth.token.email` (on `/children`, `/subscriptions`, `/practiceSessions`).
+   - **Agent**: scoped via `matchesAgentEmail(data.email)` or matching synthetic `phoneAuthDigits() == data.phone` (on `/agents`) and `matchesAgentEmail(data.agentEmail)` or `agentPhone == phoneAuthDigits()` (on `/parents`, `/children`, `/subscriptions`, `/practiceSessions`, `/leads`, `/studentSubscriptions`, `/payoutRequests`, `/vouchers`).
+   - **Parent**: scoped via `matchesParentEmail(data.email) || matchesParentEmail(data.authEmail) || contact == phoneAuthDigits()` (on `/parents`) and `matchesParentEmail(data.parentEmail) || matchesParentEmail(data.parentAuthEmail)` (on `/children`, `/subscriptions`, `/practiceSessions`).
    - **Student Subscriber**: scoped via `ownerUid == request.auth.uid` or `subscriberEmail == request.auth.token.email` (on `/studentSubscriptions`).
 4. **Zero-PII Public Referral Lookup (`/referralCodes/{code}`)**: Public single-doc `get` (no `list`) exposes only `{ code, workspaceId, agentId, agentName, isActive, approvalStatus, emailHash, phoneHash, updatedAt }` without leaking agent emails, phone numbers, or UPI IDs.
 5. **Agent Approval & Payout Guardrails**:
@@ -17,6 +17,9 @@
    - `/vouchers/{voucherId}` permits creation only by Admin (`status: 'unused'`) and enforces single-use redemption (`existing().status == 'unused' && incoming().status == 'redeemed'`, binding `redeemedByUid` and `redeemedByEmail`).
 7. **Anti-Cheat Leaderboard Moderation**:
    - Non-admin users cannot modify `isHidden` on `/leaderboard` or `/childLeaderboard`; Admin alone controls visibility moderation (`isHidden`) and clears/updates `isFlagged` / `flagReason`.
+8. **Zero-PII Cross-Device Portal Login Index (`/portalLogin/{token}`)**:
+   - Document key `token` is a 64-char hex SHA-256 preimage of `role:phoneDigits:password`; `allow list: if false` prevents enumeration while single-doc `allow get` requires the exact 64-hex token and exposes zero passwords.
+   - Only Admins or authorized Agent/Parent owners of `accountId` may create, update, or delete `/portalLogin/{token}` entries, and client sign-in always re-verifies live Firestore `password` after authenticating.
 
 ## 2. Adversarial Payloads (All Must Return PERMISSION_DENIED)
 1. **DD-01 (Unverified Admin Spoof)**: Admin email with `email_verified: false` reading `/agents`.
@@ -38,3 +41,5 @@
 17. **DD-17 (Cross-Tenant Financial/Lead Read)**: Unrelated user reading another user's `/payoutRequests/{id}` or `/studentSubscriptions/{id}`.
 18. **DD-18 (Non-Admin Leaderboard Moderation Spoof)**: Non-admin setting `isHidden: true` on `/leaderboard/{id}`.
 19. **DD-19 (Self-Referral Commission Attribution)**: Agent attributing their own `/studentSubscriptions/{id}` purchase to themselves.
+20. **DD-25 (Portal Login Enumeration / Short Token Read)**: Unauthenticated caller attempting `list` or non-64-hex `get` on `/portalLogin`.
+21. **DD-26 (Unauthorized Portal Login Write)**: Attacker creating or overwriting a `/portalLogin/{token}` record pointing to another Agent or Parent `accountId`.

@@ -1,6 +1,7 @@
 import type { User } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -30,6 +31,7 @@ import {
   ParentProfile,
   PaymentMethod,
   PayoutRequest,
+  PortalLoginRecord,
   PracticeSession,
   ReferralCodePublic,
   RoleSession,
@@ -50,9 +52,15 @@ import {
   normalizeIndianClass,
 } from '../types/math';
 import {
+  buildAgentAuthEmail,
+  buildParentAuthEmail,
+  buildPortalLoginToken,
+  buildVersionedPhoneAuthEmail,
+  extractPhoneFromSyntheticAuthEmail,
   hashContactForAttribution,
   isPhoneAuthEmail,
   normalizeEmailForMatch,
+  normalizePhoneDigits,
   normalizePhoneForMatch,
 } from '../utils/referral';
 import { db, handleFirestoreError, OperationType } from './firebase';
@@ -417,13 +425,132 @@ function subscribeMergedQueries<T extends { id: string; createdAtMs: number }>(
 }
 
 // -----------------------------------------------------------------------------
-// Automatic Role Lookup from Cloud Firestore on Google Sign-In
+// Portal Login Bridge (/portalLogin/{token}) — Zero-PII Mobile+Password Index
+// -----------------------------------------------------------------------------
+
+function isValidPortalLoginToken(token: string): boolean {
+  return /^[a-f0-9]{64}$/.test(token);
+}
+
+function mapPortalLoginDoc(token: string, x: DocumentData): PortalLoginRecord {
+  return {
+    token: String(x.token ?? token),
+    role: x.role === 'parent' ? 'parent' : 'agent',
+    accountId: String(x.accountId ?? ''),
+    phoneDigits: String(x.phoneDigits ?? ''),
+    authEmail: sanitizeEmail(String(x.authEmail ?? '')),
+    legacyAuthEmail:
+      typeof x.legacyAuthEmail === 'string' && x.legacyAuthEmail.trim()
+        ? sanitizeEmail(x.legacyAuthEmail)
+        : undefined,
+    displayName: String(x.displayName ?? ''),
+    workspaceId: String(x.workspaceId ?? WORKSPACE_ID),
+    ownerUid: String(x.ownerUid ?? ''),
+    updatedAtMs: tsToMs(x.updatedAt),
+  };
+}
+
+export async function cloudLookupPortalLogin(
+  token: string
+): Promise<PortalLoginRecord | null> {
+  if (!db) return null;
+  const cleanToken = token.trim().toLowerCase();
+  if (!isValidPortalLoginToken(cleanToken)) return null;
+  try {
+    const snap = await getDoc(doc(db, 'portalLogin', cleanToken));
+    if (!snap.exists()) return null;
+    return mapPortalLoginDoc(snap.id, snap.data());
+  } catch {
+    return null;
+  }
+}
+
+export async function cloudSyncPortalLogin(
+  user: User,
+  params: {
+    role: 'agent' | 'parent';
+    accountId: string;
+    phone: string;
+    password: string;
+    displayName: string;
+    legacyAuthEmail?: string;
+  }
+): Promise<string> {
+  if (!db) return '';
+  const phoneDigits = normalizePhoneDigits(params.phone);
+  if (phoneDigits.length < 7 || !params.password) return '';
+  const token = await buildPortalLoginToken(
+    params.role,
+    phoneDigits,
+    params.password
+  );
+  if (!isValidPortalLoginToken(token)) return '';
+  const authEmail = buildVersionedPhoneAuthEmail(
+    params.role,
+    phoneDigits,
+    token
+  );
+  if (!authEmail) return '';
+  const accountId = sanitizeId(
+    params.accountId,
+    params.role === 'agent' ? 'ag' : 'par'
+  );
+  const legacyEmail = sanitizeEmail(
+    params.legacyAuthEmail ||
+      (params.role === 'agent'
+        ? buildAgentAuthEmail(phoneDigits)
+        : buildParentAuthEmail(phoneDigits))
+  );
+  const payload: Record<string, unknown> = {
+    token,
+    role: params.role,
+    accountId,
+    phoneDigits,
+    authEmail,
+    ...(legacyEmail ? { legacyAuthEmail: legacyEmail } : {}),
+    displayName: (
+      params.displayName.trim() ||
+      (params.role === 'agent' ? 'Agent' : 'Parent')
+    ).slice(0, 80),
+    workspaceId: WORKSPACE_ID,
+    ownerUid: sanitizeId(user.uid, 'u'),
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(doc(db, 'portalLogin', token), payload);
+  return token;
+}
+
+export async function cloudDeletePortalLogin(
+  role: 'agent' | 'parent',
+  phone: string,
+  password: string
+): Promise<void> {
+  if (!db) return;
+  const phoneDigits = normalizePhoneDigits(phone);
+  if (phoneDigits.length < 7 || !password) return;
+  const token = await buildPortalLoginToken(role, phoneDigits, password);
+  if (!isValidPortalLoginToken(token)) return;
+  try {
+    const ref = doc(db, 'portalLogin', token);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await deleteDoc(ref);
+    }
+  } catch {
+    // Non-fatal cleanup if token didn't exist or user lacks permission
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Automatic Role Lookup from Cloud Firestore on Google or Mobile Sign-In
 // -----------------------------------------------------------------------------
 
 export interface ResolvedFirestoreRole {
   session: RoleSession | null;
   route: '/admin' | '/agent' | '/parent' | '/';
   inactiveAgent?: boolean;
+  agentDoc?: AgentProfile;
+  parentDoc?: ParentProfile;
 }
 
 function isTrustedEmailIdentity(user: User, emailLower: string): boolean {
@@ -434,15 +561,23 @@ function isTrustedEmailIdentity(user: User, emailLower: string): boolean {
 }
 
 export async function resolveUserRoleFromFirestore(
-  user: User
+  user: User,
+  options?: {
+    expectedRole?: 'agent' | 'parent';
+    preferredAccountId?: string;
+    phoneDigits?: string;
+  }
 ): Promise<ResolvedFirestoreRole> {
   if (!db) return { session: null, route: '/' };
   const firestore = db;
 
   const emailLower = sanitizeEmail(user.email ?? '');
+  const synthetic = extractPhoneFromSyntheticAuthEmail(emailLower);
+  const effectivePhone =
+    options?.phoneDigits || synthetic?.phoneDigits || '';
 
   // 1. Bootstrapped Platform Admin (strictly requires verified Google email)
-  if (user.emailVerified && emailLower === BOOTSTRAPPED_ADMIN_EMAIL) {
+  if (!options?.expectedRole && user.emailVerified && emailLower === BOOTSTRAPPED_ADMIN_EMAIL) {
     return {
       session: {
         role: 'admin',
@@ -454,7 +589,7 @@ export async function resolveUserRoleFromFirestore(
   }
 
   // 2. Explicit /admins/{uid} doc (strictly requires verified Google email)
-  if (user.emailVerified) {
+  if (!options?.expectedRole && user.emailVerified) {
     try {
       const adminSnap = await getDoc(doc(firestore, 'admins', user.uid));
       if (adminSnap.exists()) {
@@ -476,15 +611,97 @@ export async function resolveUserRoleFromFirestore(
     return { session: null, route: '/' };
   }
 
-  // 3. Field / Sales Agent matched by verified Google email or phone-auth identity
-  try {
-    const agentSnap = await getDocs(
-      query(collection(firestore, 'agents'), where('email', '==', emailLower), limit(5))
-    );
-    if (!agentSnap.empty) {
-      const matchedAgents = agentSnap.docs.map((d) =>
-        mapAgentDoc(d.id, d.data(), user.uid)
+  // 2b. Fast direct doc fetch when a portalLogin token pointed to a specific accountId
+  if (options?.preferredAccountId && options?.expectedRole) {
+    const colName = options.expectedRole === 'agent' ? 'agents' : 'parents';
+    try {
+      const directSnap = await getDoc(
+        doc(firestore, colName, sanitizeId(options.preferredAccountId, options.expectedRole === 'agent' ? 'ag' : 'par'))
       );
+      if (directSnap.exists()) {
+        if (options.expectedRole === 'agent') {
+          const ag = mapAgentDoc(directSnap.id, directSnap.data(), user.uid);
+          const status = getAgentApprovalStatus(ag);
+          if (status === 'suspended') {
+            return { session: null, route: '/', inactiveAgent: true, agentDoc: ag };
+          }
+          return {
+            session: {
+              role: 'agent',
+              accountId: ag.id,
+              displayName: ag.name,
+            },
+            route: '/agent',
+            agentDoc: ag,
+          };
+        } else {
+          const par = mapParentDoc(directSnap.id, directSnap.data(), user.uid);
+          return {
+            session: {
+              role: 'parent',
+              accountId: par.id,
+              displayName: par.name,
+            },
+            route: '/parent',
+            parentDoc: par,
+          };
+        }
+      }
+    } catch {
+      // Fall through to filtered queries if direct lookup was not authorized
+    }
+  }
+
+  // 3. Field / Sales Agent matched by email, canonical phone email, or phone digits
+  if (!options?.expectedRole || options.expectedRole === 'agent') {
+    const agentQueriesToTry: Array<Query<DocumentData>> = [
+      query(collection(firestore, 'agents'), where('email', '==', emailLower), limit(5)),
+    ];
+    if (synthetic?.role === 'agent') {
+      if (synthetic.canonicalEmail !== emailLower) {
+        agentQueriesToTry.push(
+          query(
+            collection(firestore, 'agents'),
+            where('email', '==', synthetic.canonicalEmail),
+            limit(5)
+          )
+        );
+      }
+      agentQueriesToTry.push(
+        query(
+          collection(firestore, 'agents'),
+          where('phone', '==', synthetic.phoneDigits),
+          limit(5)
+        )
+      );
+    } else if (effectivePhone) {
+      agentQueriesToTry.push(
+        query(
+          collection(firestore, 'agents'),
+          where('phone', '==', effectivePhone),
+          limit(5)
+        )
+      );
+    }
+
+    const matchedAgents: AgentProfile[] = [];
+    const seenAgentIds = new Set<string>();
+    for (const q of agentQueriesToTry) {
+      try {
+        const snap = await getDocs(q);
+        for (const d of snap.docs) {
+          if (!seenAgentIds.has(d.id)) {
+            seenAgentIds.add(d.id);
+            matchedAgents.push(mapAgentDoc(d.id, d.data(), user.uid));
+          }
+        }
+        if (matchedAgents.length > 0) break;
+      } catch {
+        // Continue remaining queries
+      }
+    }
+
+    if (matchedAgents.length > 0) {
       const preferredAgent =
         matchedAgents.find((a) => getAgentApprovalStatus(a) === 'approved') ??
         matchedAgents.find((a) => getAgentApprovalStatus(a) === 'pending') ??
@@ -492,7 +709,12 @@ export async function resolveUserRoleFromFirestore(
 
       const status = getAgentApprovalStatus(preferredAgent);
       if (status === 'suspended') {
-        return { session: null, route: '/', inactiveAgent: true };
+        return {
+          session: null,
+          route: '/',
+          inactiveAgent: true,
+          agentDoc: preferredAgent,
+        };
       }
       return {
         session: {
@@ -501,40 +723,69 @@ export async function resolveUserRoleFromFirestore(
           displayName: preferredAgent.name,
         },
         route: '/agent',
+        agentDoc: preferredAgent,
       };
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'agents');
   }
 
-  // 4. Parent matched by verified Google email or phone-auth email (authEmail)
-  try {
-    const parentEmailSnap = await getDocs(
-      query(collection(firestore, 'parents'), where('email', '==', emailLower), limit(5))
-    );
-    const parentSnap = !parentEmailSnap.empty
-      ? parentEmailSnap
-      : await getDocs(
+  // 4. Parent matched by email, authEmail, canonical synthetic email, or contact phone digits
+  if (!options?.expectedRole || options.expectedRole === 'parent') {
+    const parentQueriesToTry: Array<Query<DocumentData>> = [
+      query(collection(firestore, 'parents'), where('email', '==', emailLower), limit(5)),
+      query(collection(firestore, 'parents'), where('authEmail', '==', emailLower), limit(5)),
+    ];
+    if (synthetic?.role === 'parent') {
+      if (synthetic.canonicalEmail !== emailLower) {
+        parentQueriesToTry.push(
           query(
             collection(firestore, 'parents'),
-            where('authEmail', '==', emailLower),
+            where('email', '==', synthetic.canonicalEmail),
+            limit(5)
+          ),
+          query(
+            collection(firestore, 'parents'),
+            where('authEmail', '==', synthetic.canonicalEmail),
             limit(5)
           )
         );
-    if (!parentSnap.empty) {
-      const parentDoc = parentSnap.docs[0];
-      const parent = mapParentDoc(parentDoc.id, parentDoc.data(), user.uid);
-      return {
-        session: {
-          role: 'parent',
-          accountId: parent.id,
-          displayName: parent.name,
-        },
-        route: '/parent',
-      };
+      }
+      parentQueriesToTry.push(
+        query(
+          collection(firestore, 'parents'),
+          where('contact', '==', synthetic.phoneDigits),
+          limit(5)
+        )
+      );
+    } else if (effectivePhone) {
+      parentQueriesToTry.push(
+        query(
+          collection(firestore, 'parents'),
+          where('contact', '==', effectivePhone),
+          limit(5)
+        )
+      );
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'parents');
+
+    for (const q of parentQueriesToTry) {
+      try {
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const parentDoc = snap.docs[0];
+          const parent = mapParentDoc(parentDoc.id, parentDoc.data(), user.uid);
+          return {
+            session: {
+              role: 'parent',
+              accountId: parent.id,
+              displayName: parent.name,
+            },
+            route: '/parent',
+            parentDoc: parent,
+          };
+        }
+      } catch {
+        // Continue remaining queries
+      }
+    }
   }
 
   return { session: null, route: '/' };
@@ -570,6 +821,15 @@ export function subscribePlatformWorkspace(
   const isBootstrappedAdmin =
     Boolean(user.emailVerified) && emailLower === BOOTSTRAPPED_ADMIN_EMAIL;
   const trustedIdentity = isTrustedEmailIdentity(user, emailLower);
+  const synthetic = extractPhoneFromSyntheticAuthEmail(emailLower);
+  const canonicalEmail =
+    synthetic && synthetic.canonicalEmail !== emailLower
+      ? synthetic.canonicalEmail
+      : '';
+  const agentPhoneDigits =
+    synthetic?.role === 'agent' ? synthetic.phoneDigits : '';
+  const parentPhoneDigits =
+    synthetic?.role === 'parent' ? synthetic.phoneDigits : '';
 
   let settledCollections = 0;
   const markCollectionSettled = () => {
@@ -613,6 +873,32 @@ export function subscribePlatformWorkspace(
                     limit(50)
                   ),
                 },
+                ...(canonicalEmail && synthetic?.role === 'agent'
+                  ? [
+                      {
+                        key: 'canonicalEmail',
+                        path: 'agents',
+                        q: query(
+                          collection(firestore, 'agents'),
+                          where('email', '==', canonicalEmail),
+                          limit(50)
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(agentPhoneDigits
+                  ? [
+                      {
+                        key: 'phone',
+                        path: 'agents',
+                        q: query(
+                          collection(firestore, 'agents'),
+                          where('phone', '==', agentPhoneDigits),
+                          limit(50)
+                        ),
+                      },
+                    ]
+                  : []),
               ]
             : []),
         ];
@@ -669,6 +955,67 @@ export function subscribePlatformWorkspace(
                     limit(25)
                   ),
                 },
+                ...(canonicalEmail && synthetic?.role === 'agent'
+                  ? [
+                      {
+                        key: 'canonicalAgentEmail',
+                        path: 'parents',
+                        q: query(
+                          collection(firestore, 'parents'),
+                          where('agentEmail', '==', canonicalEmail),
+                          limit(250)
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(agentPhoneDigits
+                  ? [
+                      {
+                        key: 'agentPhone',
+                        path: 'parents',
+                        q: query(
+                          collection(firestore, 'parents'),
+                          where('agentPhone', '==', agentPhoneDigits),
+                          limit(250)
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(canonicalEmail && synthetic?.role === 'parent'
+                  ? [
+                      {
+                        key: 'canonicalParentEmail',
+                        path: 'parents',
+                        q: query(
+                          collection(firestore, 'parents'),
+                          where('email', '==', canonicalEmail),
+                          limit(25)
+                        ),
+                      },
+                      {
+                        key: 'canonicalParentAuthEmail',
+                        path: 'parents',
+                        q: query(
+                          collection(firestore, 'parents'),
+                          where('authEmail', '==', canonicalEmail),
+                          limit(25)
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(parentPhoneDigits
+                  ? [
+                      {
+                        key: 'contactPhone',
+                        path: 'parents',
+                        q: query(
+                          collection(firestore, 'parents'),
+                          where('contact', '==', parentPhoneDigits),
+                          limit(25)
+                        ),
+                      },
+                    ]
+                  : []),
               ]
             : []),
         ];
@@ -727,6 +1074,41 @@ export function subscribePlatformWorkspace(
                     limit(250)
                   ),
                 },
+                ...(canonicalEmail && synthetic?.role === 'agent'
+                  ? [
+                      {
+                        key: 'canonicalAgentEmail',
+                        path: colName,
+                        q: query(
+                          collection(firestore, colName),
+                          where('agentEmail', '==', canonicalEmail),
+                          limit(250)
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(canonicalEmail && synthetic?.role === 'parent'
+                  ? [
+                      {
+                        key: 'canonicalParentEmail',
+                        path: colName,
+                        q: query(
+                          collection(firestore, colName),
+                          where('parentEmail', '==', canonicalEmail),
+                          limit(250)
+                        ),
+                      },
+                      {
+                        key: 'canonicalParentAuthEmail',
+                        path: colName,
+                        q: query(
+                          collection(firestore, colName),
+                          where('parentAuthEmail', '==', canonicalEmail),
+                          limit(250)
+                        ),
+                      },
+                    ]
+                  : []),
               ]
             : []),
         ];
@@ -765,6 +1147,19 @@ export function subscribePlatformWorkspace(
                     limit(250)
                   ),
                 },
+                ...(canonicalEmail && synthetic?.role === 'agent'
+                  ? [
+                      {
+                        key: 'canonicalAgentEmail',
+                        path: colName,
+                        q: query(
+                          collection(firestore, colName),
+                          where('agentEmail', '==', canonicalEmail),
+                          limit(250)
+                        ),
+                      },
+                    ]
+                  : []),
               ]
             : []),
         ];
@@ -812,6 +1207,19 @@ export function subscribePlatformWorkspace(
                     limit(250)
                   ),
                 },
+                ...(canonicalEmail && synthetic?.role === 'agent'
+                  ? [
+                      {
+                        key: 'canonicalAgentEmail',
+                        path: 'studentSubscriptions',
+                        q: query(
+                          collection(firestore, 'studentSubscriptions'),
+                          where('agentEmail', '==', canonicalEmail),
+                          limit(250)
+                        ),
+                      },
+                    ]
+                  : []),
               ]
             : []),
         ];
@@ -840,6 +1248,19 @@ export function subscribePlatformWorkspace(
               limit(100)
             ),
           },
+          ...(canonicalEmail && synthetic?.role === 'agent'
+            ? [
+                {
+                  key: 'canonicalAgentEmail',
+                  path: 'vouchers',
+                  q: query(
+                    collection(firestore, 'vouchers'),
+                    where('agentEmail', '==', canonicalEmail),
+                    limit(100)
+                  ),
+                },
+              ]
+            : []),
         ]
       : [];
 

@@ -4,9 +4,10 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
-import { formatPhoneAuthError, useFirebase } from './FirebaseContext';
+import { useFirebase } from './FirebaseContext';
 import {
   provisionAgentAuthAccount,
   provisionPhoneAuthAccount,
@@ -21,9 +22,12 @@ import {
   cloudCreateStudentSubscription,
   cloudCreateSubscription,
   cloudCreateTrialLead,
+  cloudDeletePortalLogin,
   cloudLookupAndRedeemVoucher,
+  cloudLookupPortalLogin,
   cloudMarkPayoutPaid,
   cloudSaveAppConfig,
+  cloudSyncPortalLogin,
   cloudUpdateAgent,
   cloudUpdateAgentPassword,
   cloudUpdateAgentSelfProfile,
@@ -94,6 +98,8 @@ import { hashSecret, verifySecret } from '../utils/crypto';
 import {
   buildAgentAuthEmail,
   buildParentAuthEmail,
+  buildPortalLoginToken,
+  buildVersionedPhoneAuthEmail,
   captureReferralFromCurrentUrl,
   hashContactForAttribution,
   isPhoneAgentAuthEmail,
@@ -119,6 +125,32 @@ function makeVoucherCode(): string {
     part += chars[Math.floor(Math.random() * chars.length)];
   }
   return `GM-${part}`;
+}
+
+function buildPasswordCandidates(raw: string): string[] {
+  const list: string[] = [];
+  if (raw) list.push(raw);
+  const trimmed = raw.trim();
+  if (trimmed && !list.includes(trimmed)) list.push(trimmed);
+  return list;
+}
+
+async function verifyDocPassword(
+  doc: { password?: string; passcodeHash: string },
+  candidates: string[]
+): Promise<boolean> {
+  if (typeof doc.password === 'string' && doc.password.length > 0) {
+    const docTrimmed = doc.password.trim();
+    return candidates.some(
+      (cand) => cand === doc.password || (docTrimmed.length > 0 && cand.trim() === docTrimmed)
+    );
+  }
+  for (const cand of candidates) {
+    if (await verifySecret(cand, doc.passcodeHash)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function loadActiveChildSession(): RoleSession | null {
@@ -420,7 +452,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     signInWithGoogle,
     signInWithGoogleRedirect,
     signInWithPhoneCredentials,
-    signUpWithPhoneCredentials,
+    signInOrProvisionTokenAccount,
     changeCurrentPassword,
     signOutUser,
   } = useFirebase();
@@ -592,6 +624,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => unsub();
   }, [authReady, user, isConfigured, updateRoleSession]);
 
+  const syncedPortalKeysRef = useRef<Set<string>>(new Set());
+
   // 3. Automatically resolve verified role from Firestore
   useEffect(() => {
     if (!authReady || !user || !isConfigured) return;
@@ -641,6 +675,57 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       cancelled = true;
     };
   }, [authReady, user, isConfigured, googleSignInSeq]);
+
+  // 4. Background backfill of /portalLogin/{token} for loaded Agent & Parent profiles
+  useEffect(() => {
+    if (!isConfigured || !user || platformLoading) return;
+    let cancelled = false;
+
+    const runBackfill = async () => {
+      for (const a of agents) {
+        if (cancelled) return;
+        const digits = normalizePhoneDigits(a.phone);
+        if (digits.length < 7 || !a.password) continue;
+        for (const pwd of buildPasswordCandidates(a.password)) {
+          const cacheKey = `agent:${a.id}:${digits}:${pwd}`;
+          if (syncedPortalKeysRef.current.has(cacheKey)) continue;
+          syncedPortalKeysRef.current.add(cacheKey);
+          await cloudSyncPortalLogin(user, {
+            role: 'agent',
+            accountId: a.id,
+            phone: digits,
+            password: pwd,
+            displayName: a.name,
+            legacyAuthEmail: a.email,
+          }).catch(() => {});
+        }
+      }
+
+      for (const p of parents) {
+        if (cancelled) return;
+        const digits = normalizePhoneDigits(p.contact);
+        if (digits.length < 7 || !p.password) continue;
+        for (const pwd of buildPasswordCandidates(p.password)) {
+          const cacheKey = `parent:${p.id}:${digits}:${pwd}`;
+          if (syncedPortalKeysRef.current.has(cacheKey)) continue;
+          syncedPortalKeysRef.current.add(cacheKey);
+          await cloudSyncPortalLogin(user, {
+            role: 'parent',
+            accountId: p.id,
+            phone: digits,
+            password: pwd,
+            displayName: p.name,
+            legacyAuthEmail: p.authEmail || buildParentAuthEmail(digits),
+          }).catch(() => {});
+        }
+      }
+    };
+
+    void runBackfill();
+    return () => {
+      cancelled = true;
+    };
+  }, [agents, isConfigured, parents, platformLoading, user]);
 
   // Selectors
   const getAgentById = useCallback(
@@ -1349,7 +1434,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
     }) => {
       const nameClean = input.name.trim();
       const phoneDigits = normalizePhoneDigits(input.phone);
-      const password = input.password;
+      const passwordClean = input.password.trim();
       const cityClean = input.city.trim();
       const upiClean = input.upiId.trim();
 
@@ -1365,10 +1450,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'Enter a valid mobile phone number (at least 7 digits).',
         };
       }
-      if (password.length < 6) {
+      if (passwordClean.length < 4) {
         return {
           ok: false,
-          error: 'Password must be at least 6 characters long.',
+          error: 'Password must be at least 4 characters long.',
         };
       }
       if (!upiClean.includes('@')) {
@@ -1406,7 +1491,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         `${baseSlug}${Math.floor(100 + Math.random() * 900)}`;
 
       const now = Date.now();
-      const passcodeHash = await hashSecret(password);
+      const passcodeHash = await hashSecret(passwordClean);
 
       if (!isConfigured) {
         const newAgent: AgentProfile = {
@@ -1425,7 +1510,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           commissionPerConversion: 0,
           defaultYearlyFee: ANNUAL_PLAN_PRICE_INR,
           passcodeHash,
-          password,
+          password: passwordClean,
           isActive: false,
           createdAtMs: now,
           updatedAtMs: now,
@@ -1442,11 +1527,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         return { ok: true, agent: newAgent };
       }
 
-      const signupOutcome = await signUpWithPhoneCredentials(
+      const token = await buildPortalLoginToken('agent', phoneDigits, passwordClean);
+      const versionedEmail = buildVersionedPhoneAuthEmail(
+        'agent',
         phoneDigits,
-        password,
-        nameClean,
-        'agent'
+        token
+      );
+      const existingTokenRecord = await cloudLookupPortalLogin(token);
+      if (existingTokenRecord) {
+        return {
+          ok: false,
+          error:
+            'An Agent profile with this phone number already exists. Sign in with your phone number and password.',
+        };
+      }
+
+      const signupOutcome = await signInOrProvisionTokenAccount(
+        versionedEmail,
+        token.slice(0, 24),
+        nameClean
       );
       if (!signupOutcome.user) {
         return {
@@ -1454,6 +1553,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           error:
             signupOutcome.error ||
             'Could not register phone number and password.',
+        };
+      }
+
+      const alreadyRegistered = await resolveUserRoleFromFirestore(
+        signupOutcome.user,
+        { expectedRole: 'agent', phoneDigits }
+      );
+      if (alreadyRegistered.agentDoc) {
+        await signOutUser();
+        return {
+          ok: false,
+          error:
+            'An Agent profile with this phone number already exists. Sign in with your phone number and password.',
         };
       }
 
@@ -1473,7 +1585,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         commissionPerConversion: 0,
         defaultYearlyFee: ANNUAL_PLAN_PRICE_INR,
         passcodeHash,
-        password,
+        password: passwordClean,
         isActive: false,
         createdAtMs: now,
         updatedAtMs: now,
@@ -1481,6 +1593,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       try {
         await cloudCreateAgent(signupOutcome.user, newAgent);
+        await cloudSyncPortalLogin(signupOutcome.user, {
+          role: 'agent',
+          accountId: newAgent.id,
+          phone: phoneDigits,
+          password: passwordClean,
+          displayName: nameClean,
+          legacyAuthEmail: authEmail,
+        }).catch(() => {});
         setAgents((prev) =>
           prev.some((a) => a.id === newAgent.id) ? prev : [newAgent, ...prev]
         );
@@ -1497,7 +1617,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
     },
-    [agents, isConfigured, signUpWithPhoneCredentials, updateRoleSession]
+    [
+      agents,
+      isConfigured,
+      signInOrProvisionTokenAccount,
+      signOutUser,
+      updateRoleSession,
+    ]
   );
 
   const updateAgentSelfProfile = useCallback(
@@ -1533,6 +1659,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       try {
         await cloudUpdateAgentSelfProfile(target, patch);
+        if (user && target.password) {
+          const nextPhoneDigits =
+            normalizePhoneDigits(patch.phone) || normalizePhoneDigits(target.phone);
+          const prevPhoneDigits = normalizePhoneDigits(target.phone);
+          if (prevPhoneDigits && prevPhoneDigits !== nextPhoneDigits) {
+            await cloudDeletePortalLogin('agent', prevPhoneDigits, target.password);
+          }
+          if (nextPhoneDigits.length >= 7) {
+            await cloudSyncPortalLogin(user, {
+              role: 'agent',
+              accountId: target.id,
+              phone: nextPhoneDigits,
+              password: target.password,
+              displayName: patch.name.trim() || target.name,
+              legacyAuthEmail: target.email,
+            }).catch(() => {});
+          }
+        }
         return { ok: true };
       } catch (err) {
         return {
@@ -1541,38 +1685,29 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
     },
-    [agents, isConfigured]
+    [agents, isConfigured, user]
   );
 
   const changeAgentPassword = useCallback(
     async (agentId: string, newPassword: string) => {
       const target = agents.find((a) => a.id === agentId);
       if (!target) return { ok: false, error: 'Agent profile not found.' };
-      if (newPassword.length < 6) {
+      const nextPwd = newPassword.trim();
+      if (nextPwd.length < 4) {
         return {
           ok: false,
-          error: 'New password must be at least 6 characters long.',
+          error: 'New password must be at least 4 characters long.',
         };
       }
 
-      if (isConfigured && user && isPhoneAgentAuthEmail(user.email)) {
-        const authRes = await changeCurrentPassword(newPassword);
-        if (!authRes.ok) {
-          return {
-            ok: false,
-            error: authRes.error || 'Could not update login password.',
-          };
-        }
-      }
-
-      const nextHash = await hashSecret(newPassword);
+      const nextHash = await hashSecret(nextPwd);
       if (!isConfigured) {
         const local = loadLocalGrowthState();
         local.agents = local.agents.map((a) =>
           a.id === agentId
             ? {
                 ...a,
-                password: newPassword,
+                password: nextPwd,
                 passcodeHash: nextHash,
                 updatedAtMs: Date.now(),
               }
@@ -1584,7 +1719,40 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       try {
-        await cloudUpdateAgentPassword(agentId, newPassword, nextHash);
+        await cloudUpdateAgentPassword(agentId, nextPwd, nextHash);
+
+        const phoneDigits = normalizePhoneDigits(target.phone);
+        if (target.password && target.password !== nextPwd && phoneDigits.length >= 7) {
+          await cloudDeletePortalLogin('agent', phoneDigits, target.password);
+        }
+
+        if (user && phoneDigits.length >= 7) {
+          const newToken = await cloudSyncPortalLogin(user, {
+            role: 'agent',
+            accountId: target.id,
+            phone: phoneDigits,
+            password: nextPwd,
+            displayName: target.name,
+            legacyAuthEmail: target.email,
+          }).catch(() => '');
+
+          if (isPhoneAgentAuthEmail(user.email)) {
+            if (nextPwd.length >= 6 && user.email?.toLowerCase() === buildAgentAuthEmail(phoneDigits)) {
+              await changeCurrentPassword(nextPwd).catch(() => {});
+            } else if (newToken) {
+              const versionedEmail = buildVersionedPhoneAuthEmail(
+                'agent',
+                phoneDigits,
+                newToken
+              );
+              await signInOrProvisionTokenAccount(
+                versionedEmail,
+                newToken.slice(0, 24),
+                target.name
+              ).catch(() => {});
+            }
+          }
+        }
         return { ok: true };
       } catch (err) {
         return {
@@ -1593,38 +1761,35 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
     },
-    [agents, changeCurrentPassword, isConfigured, user]
+    [
+      agents,
+      changeCurrentPassword,
+      isConfigured,
+      signInOrProvisionTokenAccount,
+      user,
+    ]
   );
 
   const changeParentPassword = useCallback(
     async (parentId: string, newPassword: string) => {
       const target = parents.find((p) => p.id === parentId);
       if (!target) return { ok: false, error: 'Parent profile not found.' };
-      if (newPassword.length < 6) {
+      const nextPwd = newPassword.trim();
+      if (nextPwd.length < 4) {
         return {
           ok: false,
-          error: 'New password must be at least 6 characters long.',
+          error: 'New password must be at least 4 characters long.',
         };
       }
 
-      if (isConfigured && user && isPhoneParentAuthEmail(user.email)) {
-        const authRes = await changeCurrentPassword(newPassword);
-        if (!authRes.ok) {
-          return {
-            ok: false,
-            error: authRes.error || 'Could not update login password.',
-          };
-        }
-      }
-
-      const nextHash = await hashSecret(newPassword);
+      const nextHash = await hashSecret(nextPwd);
       if (!isConfigured) {
         setParents((prev) =>
           prev.map((p) =>
             p.id === parentId
               ? {
                   ...p,
-                  password: newPassword,
+                  password: nextPwd,
                   passcodeHash: nextHash,
                   updatedAtMs: Date.now(),
                 }
@@ -1635,7 +1800,40 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       try {
-        await cloudUpdateParentPassword(parentId, newPassword, nextHash);
+        await cloudUpdateParentPassword(parentId, nextPwd, nextHash);
+
+        const phoneDigits = normalizePhoneDigits(target.contact);
+        if (target.password && target.password !== nextPwd && phoneDigits.length >= 7) {
+          await cloudDeletePortalLogin('parent', phoneDigits, target.password);
+        }
+
+        if (user && phoneDigits.length >= 7) {
+          const newToken = await cloudSyncPortalLogin(user, {
+            role: 'parent',
+            accountId: target.id,
+            phone: phoneDigits,
+            password: nextPwd,
+            displayName: target.name,
+            legacyAuthEmail: target.authEmail || buildParentAuthEmail(phoneDigits),
+          }).catch(() => '');
+
+          if (isPhoneParentAuthEmail(user.email)) {
+            if (nextPwd.length >= 6 && user.email?.toLowerCase() === buildParentAuthEmail(phoneDigits)) {
+              await changeCurrentPassword(nextPwd).catch(() => {});
+            } else if (newToken) {
+              const versionedEmail = buildVersionedPhoneAuthEmail(
+                'parent',
+                phoneDigits,
+                newToken
+              );
+              await signInOrProvisionTokenAccount(
+                versionedEmail,
+                newToken.slice(0, 24),
+                target.name
+              ).catch(() => {});
+            }
+          }
+        }
         return { ok: true };
       } catch (err) {
         return {
@@ -1644,7 +1842,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         };
       }
     },
-    [changeCurrentPassword, isConfigured, parents, user]
+    [
+      changeCurrentPassword,
+      isConfigured,
+      parents,
+      signInOrProvisionTokenAccount,
+      user,
+    ]
   );
 
   const requestAgentPayout = useCallback(
@@ -1726,7 +1930,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   const loginAgentPhonePassword = useCallback(
     async (phone: string, password: string) => {
       const phoneDigits = normalizePhoneDigits(phone);
-      if (phoneDigits.length < 7 || !password) {
+      const candidates = buildPasswordCandidates(password);
+      if (phoneDigits.length < 7 || candidates.length === 0) {
         return {
           ok: false,
           error: 'Enter your registered phone number and password.',
@@ -1749,11 +1954,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             error: 'This Agent account has been suspended by Admin.',
           };
         }
-        const valid =
-          (typeof match.password === 'string' && match.password === password) ||
-          (await verifySecret(password, match.passcodeHash));
+        const valid = await verifyDocPassword(match, candidates);
         if (!valid) {
-          return { ok: false, error: 'Incorrect phone number or password.' };
+          return {
+            ok: false,
+            error: 'Incorrect mobile number or password. Please check and try again.',
+          };
         }
         updateRoleSession({
           role: 'agent',
@@ -1763,13 +1969,35 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         return { ok: true };
       }
 
-      const authOutcome = await signInWithPhoneCredentials(
-        phoneDigits,
-        password,
-        'agent'
-      );
-      if (authOutcome.user) {
-        const resolved = await resolveUserRoleFromFirestore(authOutcome.user);
+      let nonCredentialError: string | null = null;
+
+      // 1. Primary path: /portalLogin/{token} bridge -> versioned Firebase token session -> live Firestore password verify
+      for (const cand of candidates) {
+        const token = await buildPortalLoginToken('agent', phoneDigits, cand);
+        const portalRecord = await cloudLookupPortalLogin(token);
+        if (!portalRecord || portalRecord.role !== 'agent') continue;
+
+        const tokenAuth = await signInOrProvisionTokenAccount(
+          portalRecord.authEmail,
+          token.slice(0, 24),
+          portalRecord.displayName || 'Agent'
+        );
+        if (!tokenAuth.user) {
+          if (
+            tokenAuth.code === 'auth/network-request-failed' ||
+            tokenAuth.code === 'auth/operation-not-allowed' ||
+            tokenAuth.code === 'auth/too-many-requests'
+          ) {
+            nonCredentialError = tokenAuth.error ?? nonCredentialError;
+          }
+          continue;
+        }
+
+        const resolved = await resolveUserRoleFromFirestore(tokenAuth.user, {
+          expectedRole: 'agent',
+          preferredAccountId: portalRecord.accountId,
+          phoneDigits,
+        });
         if (resolved.inactiveAgent) {
           await signOutUser();
           return {
@@ -1777,40 +2005,101 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             error: 'Your Agent account has been suspended by Admin.',
           };
         }
-        if (resolved.session) {
+        if (resolved.agentDoc) {
+          const stillValid = await verifyDocPassword(resolved.agentDoc, [cand]);
+          if (!stillValid) {
+            await signOutUser();
+            continue;
+          }
+        }
+        if (resolved.session && resolved.session.role === 'agent') {
           updateRoleSession(resolved.session);
           return { ok: true };
         }
-        return {
-          ok: false,
-          error:
-            'Login verified, but your Agent workspace record was not found. Ask Admin to verify your Agent profile.',
-        };
+        await signOutUser();
       }
 
-      // Legacy fallback only when a user is already signed in and the matching agent uses a non-phone email
-      if (user) {
-        const legacyMatch = agents.find(
-          (a) =>
-            normalizePhoneDigits(a.phone) === phoneDigits &&
-            !isPhoneAgentAuthEmail(a.email)
+      // 2. Secondary path: Legacy Firebase Email/Password auth (`agent.<digits>@gmaths.local`)
+      for (const cand of candidates) {
+        if (cand.length < 4) continue;
+        const authOutcome = await signInWithPhoneCredentials(
+          phoneDigits,
+          cand,
+          'agent'
         );
-        if (legacyMatch) {
-          if (getAgentApprovalStatus(legacyMatch) === 'suspended') {
+        if (authOutcome.user) {
+          const resolved = await resolveUserRoleFromFirestore(authOutcome.user, {
+            expectedRole: 'agent',
+            phoneDigits,
+          });
+          if (resolved.inactiveAgent) {
+            await signOutUser();
             return {
               ok: false,
-              error: 'This Agent account has been suspended by Admin.',
+              error: 'Your Agent account has been suspended by Admin.',
             };
           }
-          const valid =
-            (typeof legacyMatch.password === 'string' &&
-              legacyMatch.password === password) ||
-            (await verifySecret(password, legacyMatch.passcodeHash));
+          if (resolved.agentDoc) {
+            const matchesLive = await verifyDocPassword(resolved.agentDoc, [cand]);
+            if (!matchesLive) {
+              await signOutUser();
+              continue;
+            }
+          }
+          if (resolved.session && resolved.session.role === 'agent') {
+            await cloudSyncPortalLogin(authOutcome.user, {
+              role: 'agent',
+              accountId: resolved.session.accountId,
+              phone: phoneDigits,
+              password: cand,
+              displayName: resolved.session.displayName,
+              legacyAuthEmail: resolved.agentDoc?.email,
+            }).catch(() => {});
+            updateRoleSession(resolved.session);
+            return { ok: true };
+          }
+          await signOutUser();
+          return {
+            ok: false,
+            error:
+              'Login verified, but your Agent workspace record was not found. Ask Admin to verify your Agent profile.',
+          };
+        }
+        if (
+          authOutcome.code === 'auth/network-request-failed' ||
+          authOutcome.code === 'auth/operation-not-allowed' ||
+          authOutcome.code === 'auth/too-many-requests'
+        ) {
+          nonCredentialError = authOutcome.error ?? nonCredentialError;
+        }
+      }
+
+      // 3. Fallback if already signed in to Firebase (search ALL loaded agents, including synthetic-email agents)
+      if (user) {
+        const loadedMatch = agents.find(
+          (a) => normalizePhoneDigits(a.phone) === phoneDigits
+        );
+        if (loadedMatch) {
+          if (getAgentApprovalStatus(loadedMatch) === 'suspended') {
+            return {
+              ok: false,
+              error: 'Your Agent account has been suspended by Admin.',
+            };
+          }
+          const valid = await verifyDocPassword(loadedMatch, candidates);
           if (valid) {
+            await cloudSyncPortalLogin(user, {
+              role: 'agent',
+              accountId: loadedMatch.id,
+              phone: phoneDigits,
+              password: loadedMatch.password || candidates[0],
+              displayName: loadedMatch.name,
+              legacyAuthEmail: loadedMatch.email,
+            }).catch(() => {});
             updateRoleSession({
               role: 'agent',
-              accountId: legacyMatch.id,
-              displayName: legacyMatch.name,
+              accountId: loadedMatch.id,
+              displayName: loadedMatch.name,
             });
             return { ok: true };
           }
@@ -1819,12 +2108,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       return {
         ok: false,
-        error: authOutcome.error || 'Incorrect phone number or password.',
+        error:
+          nonCredentialError ||
+          'Incorrect mobile number or password. Please check and try again.',
       };
     },
     [
       agents,
       isConfigured,
+      signInOrProvisionTokenAccount,
       signInWithPhoneCredentials,
       signOutUser,
       updateRoleSession,
@@ -1839,7 +2131,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       const idTrim = identifier.trim().toLowerCase();
       const idDigits = normalizePhoneDigits(identifier);
-      if (!idTrim || !passcode.trim()) {
+      const candidates = buildPasswordCandidates(passcode);
+      if (!idTrim || candidates.length === 0) {
         return {
           ok: false,
           error: 'Enter your phone number or Agent ID and password.',
@@ -1861,11 +2154,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'This Agent account has been suspended by Admin.',
         };
       }
-      const valid =
-        (typeof match.password === 'string' && match.password === passcode) ||
-        (await verifySecret(passcode, match.passcodeHash));
+      const valid = await verifyDocPassword(match, candidates);
       if (!valid) {
-        return { ok: false, error: 'Incorrect Agent password.' };
+        return {
+          ok: false,
+          error: 'Incorrect mobile number or password. Please check and try again.',
+        };
       }
       updateRoleSession({
         role: 'agent',
@@ -1880,7 +2174,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
   const loginParentPhonePassword = useCallback(
     async (phone: string, password: string) => {
       const phoneDigits = normalizePhoneDigits(phone);
-      if (phoneDigits.length < 7 || !password) {
+      const candidates = buildPasswordCandidates(password);
+      if (phoneDigits.length < 7 || candidates.length === 0) {
         return {
           ok: false,
           error: 'Enter your registered mobile number and password.',
@@ -1897,11 +2192,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             error: 'No Parent account found for this mobile number.',
           };
         }
-        const valid =
-          (typeof match.password === 'string' && match.password === password) ||
-          (await verifySecret(password, match.passcodeHash));
+        const valid = await verifyDocPassword(match, candidates);
         if (!valid) {
-          return { ok: false, error: 'Incorrect mobile number or password.' };
+          return {
+            ok: false,
+            error: 'Incorrect mobile number or password. Please check and try again.',
+          };
         }
         updateRoleSession({
           role: 'parent',
@@ -1911,35 +2207,115 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         return { ok: true };
       }
 
-      const authOutcome = await signInWithPhoneCredentials(
-        phoneDigits,
-        password,
-        'parent'
-      );
-      if (authOutcome.user) {
-        const resolved = await resolveUserRoleFromFirestore(authOutcome.user);
+      let nonCredentialError: string | null = null;
+
+      // 1. Primary path: /portalLogin/{token} bridge -> versioned Firebase token session -> live Firestore password verify
+      for (const cand of candidates) {
+        const token = await buildPortalLoginToken('parent', phoneDigits, cand);
+        const portalRecord = await cloudLookupPortalLogin(token);
+        if (!portalRecord || portalRecord.role !== 'parent') continue;
+
+        const tokenAuth = await signInOrProvisionTokenAccount(
+          portalRecord.authEmail,
+          token.slice(0, 24),
+          portalRecord.displayName || 'Parent'
+        );
+        if (!tokenAuth.user) {
+          if (
+            tokenAuth.code === 'auth/network-request-failed' ||
+            tokenAuth.code === 'auth/operation-not-allowed' ||
+            tokenAuth.code === 'auth/too-many-requests'
+          ) {
+            nonCredentialError = tokenAuth.error ?? nonCredentialError;
+          }
+          continue;
+        }
+
+        const resolved = await resolveUserRoleFromFirestore(tokenAuth.user, {
+          expectedRole: 'parent',
+          preferredAccountId: portalRecord.accountId,
+          phoneDigits,
+        });
+        if (resolved.parentDoc) {
+          const stillValid = await verifyDocPassword(resolved.parentDoc, [cand]);
+          if (!stillValid) {
+            await signOutUser();
+            continue;
+          }
+        }
         if (resolved.session && resolved.session.role === 'parent') {
           updateRoleSession(resolved.session);
           return { ok: true };
         }
-        return {
-          ok: false,
-          error:
-            'Login verified, but your Parent workspace record was not found. Ask your Agent to check your family account.',
-        };
+        await signOutUser();
       }
 
-      // Legacy fallback when already signed in to Firebase and parent doc uses Gmail/contact match
+      // 2. Secondary path: Legacy Firebase Email/Password auth (`parent.<digits>@gmaths.local`)
+      for (const cand of candidates) {
+        if (cand.length < 4) continue;
+        const authOutcome = await signInWithPhoneCredentials(
+          phoneDigits,
+          cand,
+          'parent'
+        );
+        if (authOutcome.user) {
+          const resolved = await resolveUserRoleFromFirestore(authOutcome.user, {
+            expectedRole: 'parent',
+            phoneDigits,
+          });
+          if (resolved.parentDoc) {
+            const matchesLive = await verifyDocPassword(resolved.parentDoc, [cand]);
+            if (!matchesLive) {
+              await signOutUser();
+              continue;
+            }
+          }
+          if (resolved.session && resolved.session.role === 'parent') {
+            await cloudSyncPortalLogin(authOutcome.user, {
+              role: 'parent',
+              accountId: resolved.session.accountId,
+              phone: phoneDigits,
+              password: cand,
+              displayName: resolved.session.displayName,
+              legacyAuthEmail:
+                resolved.parentDoc?.authEmail || buildParentAuthEmail(phoneDigits),
+            }).catch(() => {});
+            updateRoleSession(resolved.session);
+            return { ok: true };
+          }
+          await signOutUser();
+          return {
+            ok: false,
+            error:
+              'Login verified, but your Parent workspace record was not found. Ask your Agent to check your family account.',
+          };
+        }
+        if (
+          authOutcome.code === 'auth/network-request-failed' ||
+          authOutcome.code === 'auth/operation-not-allowed' ||
+          authOutcome.code === 'auth/too-many-requests'
+        ) {
+          nonCredentialError = authOutcome.error ?? nonCredentialError;
+        }
+      }
+
+      // 3. Fallback when already signed in to Firebase and parent doc is loaded
       if (user) {
         const legacyMatch = parents.find(
           (p) => normalizePhoneDigits(p.contact) === phoneDigits
         );
         if (legacyMatch) {
-          const valid =
-            (typeof legacyMatch.password === 'string' &&
-              legacyMatch.password === password) ||
-            (await verifySecret(password, legacyMatch.passcodeHash));
+          const valid = await verifyDocPassword(legacyMatch, candidates);
           if (valid) {
+            await cloudSyncPortalLogin(user, {
+              role: 'parent',
+              accountId: legacyMatch.id,
+              phone: phoneDigits,
+              password: legacyMatch.password || candidates[0],
+              displayName: legacyMatch.name,
+              legacyAuthEmail:
+                legacyMatch.authEmail || buildParentAuthEmail(phoneDigits),
+            }).catch(() => {});
             updateRoleSession({
               role: 'parent',
               accountId: legacyMatch.id,
@@ -1952,13 +2328,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       return {
         ok: false,
-        error: authOutcome.error || 'Incorrect mobile number or password.',
+        error:
+          nonCredentialError ||
+          'Incorrect mobile number or password. Please check and try again.',
       };
     },
     [
       isConfigured,
       parents,
+      signInOrProvisionTokenAccount,
       signInWithPhoneCredentials,
+      signOutUser,
       updateRoleSession,
       user,
     ]
@@ -1971,7 +2351,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       const target = contact.trim().toLowerCase();
       const targetDigits = normalizePhoneDigits(contact);
-      if (!target || !passcode.trim()) {
+      const candidates = buildPasswordCandidates(passcode);
+      if (!target || candidates.length === 0) {
         return {
           ok: false,
           error: 'Enter your registered mobile or email and password.',
@@ -1988,11 +2369,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!match) {
         return loginParentPhonePassword(contact, passcode);
       }
-      const valid =
-        (typeof match.password === 'string' && match.password === passcode) ||
-        (await verifySecret(passcode, match.passcodeHash));
+      const valid = await verifyDocPassword(match, candidates);
       if (!valid) {
-        return { ok: false, error: 'Incorrect Parent password.' };
+        return {
+          ok: false,
+          error: 'Incorrect mobile number or password. Please check and try again.',
+        };
       }
       updateRoleSession({
         role: 'parent',
@@ -2085,10 +2467,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
             'Agent Name, Agent ID, and a valid Phone Number (at least 7 digits) are required.',
         };
       }
-      if (passwordClean.length < 6) {
+      if (passwordClean.length < 4) {
         return {
           ok: false,
-          error: 'Agent Password must be at least 6 characters long.',
+          error: 'Agent Password must be at least 4 characters long.',
         };
       }
 
@@ -2107,17 +2489,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       let provisionedUid: string | null = null;
-      try {
-        provisionedUid = await provisionAgentAuthAccount(
-          authEmail,
-          passwordClean
-        );
-      } catch (authErr) {
-        const formatted = formatPhoneAuthError(authErr);
-        return {
-          ok: false,
-          error: formatted.message,
-        };
+      if (passwordClean.length >= 6) {
+        try {
+          provisionedUid = await provisionAgentAuthAccount(
+            authEmail,
+            passwordClean
+          );
+        } catch {
+          // Non-fatal: /portalLogin bridge provides seamless login regardless of legacy auth collisions
+        }
       }
 
       const now = Date.now();
@@ -2153,6 +2533,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       try {
         await cloudCreateAgent(user, newAgent);
+        await cloudSyncPortalLogin(user, {
+          role: 'agent',
+          accountId: newAgent.id,
+          phone: phoneDigits,
+          password: passwordClean,
+          displayName: newAgent.name,
+          legacyAuthEmail: authEmail,
+        }).catch(() => {});
         setPlatformError(null);
         return { ok: true, agent: newAgent };
       } catch (err) {
@@ -2189,7 +2577,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       const existing = agents.find((a) => a.id === agentId);
       if (!existing) return { ok: false, error: 'Agent not found.' };
 
-      const phoneClean = normalizePhoneDigits(updates.phone) || existing.phone;
+      const phoneClean = normalizePhoneDigits(updates.phone) || normalizePhoneDigits(existing.phone);
       const emailClean =
         updates.email.trim().toLowerCase() || existing.email || buildAgentAuthEmail(phoneClean);
       if (!emailClean.includes('@')) {
@@ -2200,10 +2588,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       const trimmedNewPass = updates.newPasscode?.trim() ?? '';
-      if (trimmedNewPass && trimmedNewPass.length < 6) {
+      if (trimmedNewPass && trimmedNewPass.length < 4) {
         return {
           ok: false,
-          error: 'New password must be at least 6 characters long.',
+          error: 'New password must be at least 4 characters long.',
         };
       }
 
@@ -2220,7 +2608,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         ...existing,
         agentCode: updates.agentCode.trim().toUpperCase() || existing.agentCode,
         name: updates.name.trim() || existing.name,
-        phone: updates.phone.trim() || existing.phone,
+        phone: phoneClean || updates.phone.trim() || existing.phone,
         email: emailClean,
         assignedArea: updates.assignedArea.trim() || existing.assignedArea,
         city: updates.city !== undefined ? updates.city.trim() : existing.city,
@@ -2245,6 +2633,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
 
       try {
         await cloudUpdateAgent(updated);
+        const existingPhoneDigits = normalizePhoneDigits(existing.phone);
+        if (
+          existing.password &&
+          (trimmedNewPass || existingPhoneDigits !== phoneClean) &&
+          existingPhoneDigits.length >= 7
+        ) {
+          await cloudDeletePortalLogin(
+            'agent',
+            existingPhoneDigits,
+            existing.password
+          );
+        }
+        if (plainPassword && phoneClean.length >= 7) {
+          await cloudSyncPortalLogin(user, {
+            role: 'agent',
+            accountId: updated.id,
+            phone: phoneClean,
+            password: plainPassword,
+            displayName: updated.name,
+            legacyAuthEmail: updated.email,
+          }).catch(() => {});
+        }
         setPlatformError(null);
         return { ok: true };
       } catch (err) {
@@ -2560,10 +2970,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'Parent Name and a valid Mobile Number (at least 7 digits) are required.',
         };
       }
-      if (passwordClean.length < 6) {
+      if (passwordClean.length < 4) {
         return {
           ok: false,
-          error: 'Parent Password must be at least 6 characters long.',
+          error: 'Parent Password must be at least 4 characters long.',
         };
       }
       if (rawEmailClean && !rawEmailClean.includes('@')) {
@@ -2601,14 +3011,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
-      try {
-        await provisionPhoneAuthAccount(parentAuthEmail, passwordClean, true);
-      } catch (authErr) {
-        const formatted = formatPhoneAuthError(authErr, 'parent');
-        return {
-          ok: false,
-          error: formatted.message,
-        };
+      if (passwordClean.length >= 6) {
+        try {
+          await provisionPhoneAuthAccount(parentAuthEmail, passwordClean, true);
+        } catch {
+          // Non-fatal: /portalLogin bridge handles sign-in regardless of legacy auth collisions
+        }
       }
 
       const now = Date.now();
@@ -2680,6 +3088,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({
           ...newChildren.map((ch) => cloudCreateChild(user, ch)),
           cloudCreateSubscription(user, newSub),
         ]);
+        await cloudSyncPortalLogin(user, {
+          role: 'parent',
+          accountId: newParent.id,
+          phone: contactDigits,
+          password: passwordClean,
+          displayName: newParent.name,
+          legacyAuthEmail: parentAuthEmail,
+        }).catch(() => {});
         setPlatformError(null);
         return { ok: true, parent: newParent };
       } catch (err) {

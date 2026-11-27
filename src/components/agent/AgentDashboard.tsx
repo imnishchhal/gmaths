@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   IndianRupee,
+  KeyRound,
   Lock,
   LogOut,
   MessageCircle,
@@ -76,6 +77,7 @@ export const AgentDashboard: React.FC = () => {
     renewParentSubscription,
     updateAgentSelfProfile,
     changeAgentPassword,
+    changeParentPassword,
     requestAgentPayout,
   } = usePlatform();
 
@@ -144,6 +146,12 @@ export const AgentDashboard: React.FC = () => {
     useState<ChildOnboardingInput>(createBlankChild());
   const [addChildError, setAddChildError] = useState<string | null>(null);
   const [submittingChild, setSubmittingChild] = useState(false);
+
+  // Set / Reset Parent Password Inline Panel State
+  const [resetPwdParentId, setResetPwdParentId] = useState<string | null>(null);
+  const [resetPwdValue, setResetPwdValue] = useState('');
+  const [resetPwdError, setResetPwdError] = useState<string | null>(null);
+  const [savingResetPwd, setSavingResetPwd] = useState(false);
 
   const myParents = useMemo(() => {
     if (!agent) return [];
@@ -345,8 +353,8 @@ export const AgentDashboard: React.FC = () => {
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError(null);
-    if (newPassword.length < 6) {
-      setPasswordError('New password must be at least 6 characters long.');
+    if (newPassword.length < 4) {
+      setPasswordError('New password must be at least 4 characters long.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -472,6 +480,32 @@ export const AgentDashboard: React.FC = () => {
     setAddChildParentId(null);
     setExtraChild(createBlankChild());
     setTimeout(() => setNotice(null), 4000);
+  };
+
+  const handleResetParentPasswordSubmit = async (
+    e: React.FormEvent,
+    parentId: string,
+    parentNameLabel: string
+  ) => {
+    e.preventDefault();
+    setResetPwdError(null);
+    if (resetPwdValue.trim().length < 4) {
+      setResetPwdError('Password must be at least 4 characters.');
+      return;
+    }
+    setSavingResetPwd(true);
+    const res = await changeParentPassword(parentId, resetPwdValue.trim());
+    setSavingResetPwd(false);
+    if (!res.ok) {
+      setResetPwdError(res.error || 'Could not update parent password.');
+      return;
+    }
+    setNotice(
+      `Updated login password for ${parentNameLabel}. They can now sign in at /parent with Mobile + Password.`
+    );
+    setResetPwdParentId(null);
+    setResetPwdValue('');
+    setTimeout(() => setNotice(null), 5000);
   };
 
   return (
@@ -787,6 +821,7 @@ export const AgentDashboard: React.FC = () => {
 
                   const isRenewing = renewParentId === parent.id;
                   const isAddingChild = addChildParentId === parent.id;
+                  const isResettingPwd = resetPwdParentId === parent.id;
 
                   return (
                     <article
@@ -905,6 +940,7 @@ export const AgentDashboard: React.FC = () => {
                           type="button"
                           onClick={() => {
                             setRenewParentId(null);
+                            setResetPwdParentId(null);
                             setAddChildError(null);
                             setExtraChild(createBlankChild());
                             setAddChildParentId(isAddingChild ? null : parent.id);
@@ -913,6 +949,25 @@ export const AgentDashboard: React.FC = () => {
                         >
                           <Plus className="w-4 h-4 shrink-0" />
                           {isAddingChild ? 'Close' : 'Add Child'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenewParentId(null);
+                            setAddChildParentId(null);
+                            setResetPwdError(null);
+                            setResetPwdValue(parent.password || '');
+                            setResetPwdParentId(isResettingPwd ? null : parent.id);
+                          }}
+                          className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          <KeyRound className="w-4 h-4 shrink-0" />
+                          {isResettingPwd
+                            ? 'Close'
+                            : parent.password
+                            ? 'Reset Password'
+                            : 'Set Password'}
                         </button>
                       </div>
 
@@ -1081,6 +1136,56 @@ export const AgentDashboard: React.FC = () => {
                             >
                               {submittingChild ? 'Adding…' : 'Save Child Profile'}
                             </button>
+                          </div>
+                        </form>
+                      )}
+
+                      {/* Inline Set / Reset Parent Password Form */}
+                      {isResettingPwd && (
+                        <form
+                          onSubmit={(e) =>
+                            void handleResetParentPasswordSubmit(
+                              e,
+                              parent.id,
+                              parent.name
+                            )
+                          }
+                          className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-4 space-y-3"
+                        >
+                          <p className="text-sm font-bold text-slate-950 dark:text-white">
+                            Set / Reset Login Password · {parent.name}
+                          </p>
+                          {resetPwdError && (
+                            <p className="text-xs text-red-600 dark:text-red-400">
+                              {resetPwdError}
+                            </p>
+                          )}
+                          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+                            <input
+                              type="text"
+                              required
+                              minLength={4}
+                              value={resetPwdValue}
+                              onChange={(e) => setResetPwdValue(e.target.value)}
+                              placeholder="Enter new password (min 4 chars)"
+                              className="flex-1 min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setResetPwdParentId(null)}
+                                className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={savingResetPwd}
+                                className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold whitespace-nowrap"
+                              >
+                                {savingResetPwd ? 'Saving…' : 'Save Password'}
+                              </button>
+                            </div>
                           </div>
                         </form>
                       )}
@@ -1452,11 +1557,11 @@ export const AgentDashboard: React.FC = () => {
                       <input
                         type={showNewPassword ? 'text' : 'password'}
                         required
-                        minLength={6}
+                        minLength={4}
                         autoComplete="new-password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Min 6 characters"
+                        placeholder="Min 4 characters"
                         className="w-full min-h-[44px] pl-3 pr-11 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
                       />
                       <button
@@ -1482,7 +1587,7 @@ export const AgentDashboard: React.FC = () => {
                     <input
                       type={showNewPassword ? 'text' : 'password'}
                       required
-                      minLength={6}
+                      minLength={4}
                       autoComplete="new-password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
@@ -1567,15 +1672,15 @@ export const AgentDashboard: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Login Password * (min 6 chars)
+                  Login Password * (min 4 chars)
                 </label>
                 <input
                   type="text"
                   required
-                  minLength={6}
+                  minLength={4}
                   value={parentPasscode}
                   onChange={(e) => setParentPasscode(e.target.value)}
-                  placeholder="Min 6 characters"
+                  placeholder="Min 4 characters"
                   className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>

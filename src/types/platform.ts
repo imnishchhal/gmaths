@@ -61,6 +61,20 @@ export interface ReferralCodePublic {
   updatedAtMs: number;
 }
 
+/** Zero-PII token-keyed bridge document mapping sha256(role:phone:password) to Auth identity */
+export interface PortalLoginRecord {
+  token: string;
+  role: 'agent' | 'parent';
+  accountId: string;
+  phoneDigits: string;
+  authEmail: string;
+  legacyAuthEmail?: string;
+  displayName: string;
+  workspaceId: string;
+  ownerUid: string;
+  updatedAtMs: number;
+}
+
 export interface ParentProfile {
   id: string;
   workspaceId: string;

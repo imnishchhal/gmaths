@@ -384,17 +384,17 @@ export const RoleAuthGate: React.FC<RoleAuthGateProps> = ({
 
                   <div className="space-y-1">
                     <label className="block text-xs font-semibold text-slate-900 dark:text-white">
-                      Create Password * (min 6 characters)
+                      Create Password * (min 4 characters)
                     </label>
                     <div className="relative">
                       <input
                         type={showPartnerPassword ? 'text' : 'password'}
                         autoComplete="new-password"
                         required
-                        minLength={6}
+                        minLength={4}
                         value={partnerPassword}
                         onChange={(e) => setPartnerPassword(e.target.value)}
-                        placeholder="At least 6 characters"
+                        placeholder="At least 4 characters"
                         className="w-full min-h-[44px] pl-3 pr-12 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
                       />
                       <button

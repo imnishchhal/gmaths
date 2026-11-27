@@ -110,8 +110,8 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
     e.preventDefault();
     setPasswordError(null);
     setPasswordSuccess(null);
-    if (newPassword.length < 6) {
-      setPasswordError('New password must be at least 6 characters long.');
+    if (newPassword.length < 4) {
+      setPasswordError('New password must be at least 4 characters long.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -544,18 +544,18 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                 htmlFor="parent-new-password"
                 className="block text-xs font-bold text-slate-700 dark:text-slate-300"
               >
-                New Password (min 6 chars)
+                New Password (min 4 chars)
               </label>
               <div className="relative">
                 <input
                   id="parent-new-password"
                   type={showNewPassword ? 'text' : 'password'}
                   required
-                  minLength={6}
+                  minLength={4}
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min 6 characters"
+                  placeholder="Min 4 characters"
                   className="w-full min-h-[44px] pl-3 pr-11 py-2 rounded-xl border-2 border-sky-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 text-sm text-slate-900 dark:text-white"
                 />
                 <button
@@ -586,7 +586,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                 id="parent-confirm-password"
                 type={showNewPassword ? 'text' : 'password'}
                 required
-                minLength={6}
+                minLength={4}
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

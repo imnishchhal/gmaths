@@ -196,6 +196,11 @@ interface FirebaseContextValue {
     password: string,
     role?: PhoneAuthRole
   ) => Promise<PhoneAuthOutcome>;
+  signInOrProvisionTokenAccount: (
+    authEmail: string,
+    authSecret: string,
+    displayName: string
+  ) => Promise<PhoneAuthOutcome>;
   signUpWithPhoneCredentials: (
     phone: string,
     password: string,
@@ -529,6 +534,72 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
     []
   );
 
+  const signInOrProvisionTokenAccount = useCallback(
+    async (
+      authEmail: string,
+      authSecret: string,
+      nextDisplayName: string
+    ): Promise<PhoneAuthOutcome> => {
+      if (!auth) {
+        return {
+          user: null,
+          error: 'Firebase Authentication is not configured.',
+        };
+      }
+      const cleanEmail = authEmail.trim().toLowerCase();
+      if (!cleanEmail || !authSecret || authSecret.length < 6) {
+        return {
+          user: null,
+          error: 'Invalid login token credentials.',
+        };
+      }
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, authSecret);
+        setAuthLoading(false);
+        return { user: cred.user };
+      } catch (err) {
+        const code = extractAuthErrorCode(err);
+        if (
+          code === 'auth/invalid-credential' ||
+          code === 'auth/user-not-found' ||
+          code === 'auth/wrong-password'
+        ) {
+          try {
+            const created = await createUserWithEmailAndPassword(
+              auth,
+              cleanEmail,
+              authSecret
+            );
+            const cleanName = sanitizeDisplayName(nextDisplayName || 'Portal User');
+            await updateProfile(created.user, { displayName: cleanName }).catch(
+              () => {}
+            );
+            setAuthLoading(false);
+            return { user: created.user };
+          } catch (createErr) {
+            const formattedCreate = formatPhoneAuthError(createErr);
+            setAuthLoading(false);
+            return {
+              user: null,
+              code: formattedCreate.code,
+              error: formattedCreate.message,
+            };
+          }
+        }
+        const formatted = formatPhoneAuthError(err);
+        setAuthLoading(false);
+        return {
+          user: null,
+          code: formatted.code,
+          error: formatted.message,
+        };
+      }
+    },
+    []
+  );
+
   const signUpWithPhoneCredentials = useCallback(
     async (
       phone: string,
@@ -549,10 +620,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'Enter a valid mobile phone number (at least 7 digits).',
         };
       }
-      if (password.length < 6) {
+      if (password.length < 4) {
         return {
           user: null,
-          error: 'Password must be at least 6 characters long.',
+          error: 'Password must be at least 4 characters long.',
         };
       }
       setAuthLoading(true);
@@ -594,10 +665,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
           error: 'Sign in with your phone number and password first.',
         };
       }
-      if (newPassword.length < 6) {
+      if (newPassword.length < 4) {
         return {
           ok: false,
-          error: 'New password must be at least 6 characters long.',
+          error: 'New password must be at least 4 characters long.',
         };
       }
       try {
@@ -739,6 +810,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogle,
       signInWithGoogleRedirect,
       signInWithPhoneCredentials,
+      signInOrProvisionTokenAccount,
       signUpWithPhoneCredentials,
       changeCurrentPassword,
       signOutUser,
@@ -767,6 +839,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({
       signInWithGoogle,
       signInWithGoogleRedirect,
       signInWithPhoneCredentials,
+      signInOrProvisionTokenAccount,
       signUpWithPhoneCredentials,
       changeCurrentPassword,
       signOutUser,

@@ -11,6 +11,7 @@ import {
   Edit3,
   Eye,
   EyeOff,
+  KeyRound,
   LogOut,
   MapPin,
   Megaphone,
@@ -96,6 +97,7 @@ export const AdminDashboard: React.FC = () => {
     createAgent,
     updateAgent,
     setAgentApprovalStatus,
+    changeParentPassword,
     adminOverrideSubscription,
     markPayoutPaid,
     generateOfflineVoucher,
@@ -127,6 +129,10 @@ export const AdminDashboard: React.FC = () => {
   const [revealedPasswords, setRevealedPasswords] = useState<
     Record<string, boolean>
   >({});
+  const [resetPwdParentId, setResetPwdParentId] = useState<string | null>(null);
+  const [resetPwdValue, setResetPwdValue] = useState('');
+  const [resetPwdError, setResetPwdError] = useState<string | null>(null);
+  const [savingResetPwd, setSavingResetPwd] = useState(false);
 
   // Payouts & Vouchers State
   const [utrByPayoutId, setUtrByPayoutId] = useState<Record<string, string>>({});
@@ -470,6 +476,32 @@ export const AdminDashboard: React.FC = () => {
     } else if (res.error) {
       setOverrideNotice(res.error);
     }
+  };
+
+  const handleResetParentPasswordSubmit = async (
+    e: React.FormEvent,
+    parentId: string,
+    parentName: string
+  ) => {
+    e.preventDefault();
+    setResetPwdError(null);
+    if (resetPwdValue.trim().length < 4) {
+      setResetPwdError('Password must be at least 4 characters.');
+      return;
+    }
+    setSavingResetPwd(true);
+    const res = await changeParentPassword(parentId, resetPwdValue.trim());
+    setSavingResetPwd(false);
+    if (!res.ok) {
+      setResetPwdError(res.error || 'Could not update parent password.');
+      return;
+    }
+    setOverrideNotice(
+      `Updated login password for ${parentName}. They can sign in at /parent with Mobile + Password.`
+    );
+    setResetPwdParentId(null);
+    setResetPwdValue('');
+    setTimeout(() => setOverrideNotice(null), 5000);
   };
 
   const handleMarkPayoutPaid = async (payoutId: string) => {
@@ -929,17 +961,17 @@ export const AdminDashboard: React.FC = () => {
                 {!editingAgentId ? (
                   <div className="space-y-1 sm:col-span-2 lg:col-span-2">
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Login Password * (min 6 characters)
+                      Login Password * (min 4 characters)
                     </label>
                     <input
                       type="text"
                       required
-                      minLength={6}
+                      minLength={4}
                       value={agentForm.passcode}
                       onChange={(e) =>
                         setAgentForm((f) => ({ ...f, passcode: e.target.value }))
                       }
-                      placeholder="Set initial password (min 6 chars) for /agent sign-in"
+                      placeholder="Set initial password (min 4 chars) for /agent sign-in"
                       className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                     />
                   </div>
@@ -950,7 +982,7 @@ export const AdminDashboard: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      minLength={6}
+                      minLength={4}
                       value={agentForm.passcode}
                       onChange={(e) =>
                         setAgentForm((f) => ({ ...f, passcode: e.target.value }))
@@ -958,7 +990,7 @@ export const AdminDashboard: React.FC = () => {
                       placeholder={`Current: ${
                         agents.find((a) => a.id === editingAgentId)?.password ||
                         'Not recorded'
-                      } — enter min 6 chars to update`}
+                      } — enter min 4 chars to update`}
                       className="w-full min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                     />
                   </div>
@@ -1474,7 +1506,75 @@ export const AdminDashboard: React.FC = () => {
                         <Ban className="w-4 h-4 shrink-0" />
                         Suspend
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetPwdError(null);
+                          setResetPwdValue(row.parent.password || '');
+                          setResetPwdParentId(
+                            resetPwdParentId === row.parent.id ? null : row.parent.id
+                          );
+                        }}
+                        className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <KeyRound className="w-4 h-4 shrink-0" />
+                        {resetPwdParentId === row.parent.id
+                          ? 'Close Password'
+                          : row.parent.password
+                          ? 'Reset Password'
+                          : 'Set Password'}
+                      </button>
                     </div>
+
+                    {resetPwdParentId === row.parent.id && (
+                      <form
+                        onSubmit={(e) =>
+                          void handleResetParentPasswordSubmit(
+                            e,
+                            row.parent.id,
+                            row.parent.name
+                          )
+                        }
+                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/60 p-3.5 space-y-2.5"
+                      >
+                        <p className="text-xs font-bold text-slate-900 dark:text-white">
+                          Set / Reset Parent Password · {row.parent.name}
+                        </p>
+                        {resetPwdError && (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            {resetPwdError}
+                          </p>
+                        )}
+                        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                          <input
+                            type="text"
+                            required
+                            minLength={4}
+                            value={resetPwdValue}
+                            onChange={(e) => setResetPwdValue(e.target.value)}
+                            placeholder="Enter new password (min 4 chars)"
+                            className="flex-1 min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setResetPwdParentId(null)}
+                              className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingResetPwd}
+                              className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold whitespace-nowrap"
+                            >
+                              {savingResetPwd ? 'Saving…' : 'Save Password'}
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    )}
                   </article>
                 );
               })}

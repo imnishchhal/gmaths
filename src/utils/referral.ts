@@ -36,6 +36,27 @@ export function buildPhoneAuthEmail(
   return `${role}.${digits}@gmaths.local`;
 }
 
+export async function buildPortalLoginToken(
+  role: PhoneAuthRole,
+  phone: string,
+  password: string
+): Promise<string> {
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 7 || !password) return '';
+  return hashSecret(`${role}:${digits}:${password}`);
+}
+
+export function buildVersionedPhoneAuthEmail(
+  role: PhoneAuthRole,
+  phone: string,
+  token: string
+): string {
+  const digits = normalizePhoneDigits(phone);
+  const hashSuffix = token.trim().toLowerCase().replace(/[^a-f0-9]/g, '').slice(0, 8);
+  if (digits.length < 7 || hashSuffix.length < 6) return '';
+  return `${role}.${digits}.${hashSuffix}@gmaths.local`;
+}
+
 export function buildAgentAuthEmail(phone: string): string {
   return buildPhoneAuthEmail('agent', phone);
 }
@@ -44,18 +65,33 @@ export function buildParentAuthEmail(phone: string): string {
   return buildPhoneAuthEmail('parent', phone);
 }
 
+export function extractPhoneFromSyntheticAuthEmail(
+  email: string | null | undefined
+): { role: PhoneAuthRole; phoneDigits: string; canonicalEmail: string } | null {
+  const clean = normalizeEmailLower(email);
+  const match = /^(agent|parent)\.([0-9]{7,15})(?:\.[a-f0-9]{6,16})?@gmaths\.local$/.exec(clean);
+  if (!match) return null;
+  const role = match[1] as PhoneAuthRole;
+  const phoneDigits = match[2];
+  return {
+    role,
+    phoneDigits,
+    canonicalEmail: `${role}.${phoneDigits}@gmaths.local`,
+  };
+}
+
 export function isPhoneAgentAuthEmail(
   email: string | null | undefined
 ): boolean {
   const clean = normalizeEmailLower(email);
-  return /^agent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
+  return /^agent\.[0-9]{7,15}(?:\.[a-f0-9]{6,16})?@gmaths\.local$/.test(clean);
 }
 
 export function isPhoneParentAuthEmail(
   email: string | null | undefined
 ): boolean {
   const clean = normalizeEmailLower(email);
-  return /^parent\.[0-9]{7,15}@gmaths\.local$/.test(clean);
+  return /^parent\.[0-9]{7,15}(?:\.[a-f0-9]{6,16})?@gmaths\.local$/.test(clean);
 }
 
 export function isPhoneAuthEmail(email: string | null | undefined): boolean {
@@ -67,7 +103,7 @@ export function formatAuthIdentityLabel(
 ): string {
   const clean = normalizeEmailLower(email);
   if (!clean) return '';
-  const match = /^(?:agent|parent)\.([0-9]{7,15})@gmaths\.local$/.exec(clean);
+  const match = /^(?:agent|parent)\.([0-9]{7,15})(?:\.[a-f0-9]{6,16})?@gmaths\.local$/.exec(clean);
   if (match) return match[1];
   return (email ?? '').trim();
 }

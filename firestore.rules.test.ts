@@ -297,29 +297,69 @@ const dbState: Record<string, Record<string, Record<string, unknown>>> = {
       createdAt: SERVER_TIME,
     },
   },
+  portalLogin: {
+    ['a'.repeat(64)]: {
+      token: 'a'.repeat(64),
+      role: 'agent',
+      accountId: 'ag_phone',
+      phoneDigits: '9876501234',
+      authEmail: 'agent.9876501234.aaaaaaaa@gmaths.local',
+      legacyAuthEmail: 'agent.9876501234@gmaths.local',
+      displayName: 'Phone Agent',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'phone_ag_uid',
+      updatedAt: SERVER_TIME,
+    },
+    ['b'.repeat(64)]: {
+      token: 'b'.repeat(64),
+      role: 'parent',
+      accountId: 'par_phone',
+      phoneDigits: '9811223344',
+      authEmail: 'parent.9811223344.bbbbbbbb@gmaths.local',
+      legacyAuthEmail: 'parent.9811223344@gmaths.local',
+      displayName: 'Phone Parent',
+      workspaceId: 'gmaths_main',
+      ownerUid: 'phone_ag_uid',
+      updatedAt: SERVER_TIME,
+    },
+  },
 };
 
 const isVerified = (auth: AuthContext) => Boolean(auth && auth.email_verified);
 const isPhoneAgentAuth = (auth: AuthContext) =>
   Boolean(
     auth &&
-      /^agent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
+      /^agent\.[0-9]{7,15}(\.[a-f0-9]{6,16})?@gmaths\.local$/.test(auth.email.toLowerCase()) &&
       auth.sign_in_provider === 'password'
   );
 const isPhoneParentAuth = (auth: AuthContext) =>
   Boolean(
     auth &&
-      /^parent\.[0-9]{7,15}@gmaths\.local$/.test(auth.email.toLowerCase()) &&
+      /^parent\.[0-9]{7,15}(\.[a-f0-9]{6,16})?@gmaths\.local$/.test(auth.email.toLowerCase()) &&
       auth.sign_in_provider === 'password'
   );
 const isAuthorizedAppUser = (auth: AuthContext) =>
   isVerified(auth) || isPhoneAgentAuth(auth) || isPhoneParentAuth(auth);
 const isBootstrappedAdmin = (auth: AuthContext) =>
   isVerified(auth) && auth!.email.toLowerCase() === BOOTSTRAPPED_ADMIN;
+const phoneAuthDigits = (auth: AuthContext) =>
+  auth!.email.toLowerCase().split('@')[0].split('.')[1] ?? '';
+const matchesAgentEmail = (auth: AuthContext, emailVal: unknown) =>
+  typeof emailVal === 'string' &&
+  emailVal.length >= 3 &&
+  (emailVal === auth!.email.toLowerCase() ||
+    (isPhoneAgentAuth(auth) && emailVal === `agent.${phoneAuthDigits(auth)}@gmaths.local`));
+const matchesParentEmail = (auth: AuthContext, emailVal: unknown) =>
+  typeof emailVal === 'string' &&
+  emailVal.length >= 3 &&
+  (emailVal === auth!.email.toLowerCase() ||
+    (isPhoneParentAuth(auth) && emailVal === `parent.${phoneAuthDigits(auth)}@gmaths.local`));
 const isValidId = (id: unknown) =>
   typeof id === 'string' && id.length >= 1 && id.length <= 128 && /^[a-zA-Z0-9_\-]+$/.test(id);
 const isValidDate = (d: unknown) =>
   typeof d === 'string' && d.length === 10 && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d);
+const isValidPortalLoginToken = (token: unknown) =>
+  typeof token === 'string' && token.length === 64 && /^[a-f0-9]{64}$/.test(token);
 
 function hasAllowedKeys(
   data: Record<string, unknown>,
@@ -335,35 +375,35 @@ function hasAllowedKeys(
 
 function isAgentAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
   if (!isAuthorizedAppUser(auth)) return false;
-  const email = auth!.email.toLowerCase();
   return (
     data.ownerUid === auth!.uid ||
     (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    (typeof data.email === 'string' && data.email.length >= 3 && data.email === email)
+    matchesAgentEmail(auth, data.email) ||
+    (isPhoneAgentAuth(auth) && typeof data.phone === 'string' && data.phone === phoneAuthDigits(auth))
   );
 }
 
 function isParentRecordAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
   if (!isAuthorizedAppUser(auth)) return false;
-  const email = auth!.email.toLowerCase();
   return (
     data.ownerUid === auth!.uid ||
     (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    (typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
-    (typeof data.email === 'string' && data.email.length >= 3 && data.email === email) ||
-    (typeof data.authEmail === 'string' && data.authEmail.length >= 3 && data.authEmail === email)
+    matchesAgentEmail(auth, data.agentEmail) ||
+    matchesParentEmail(auth, data.email) ||
+    matchesParentEmail(auth, data.authEmail) ||
+    (isPhoneAgentAuth(auth) && typeof data.agentPhone === 'string' && data.agentPhone === phoneAuthDigits(auth)) ||
+    (isPhoneParentAuth(auth) && typeof data.contact === 'string' && data.contact === phoneAuthDigits(auth))
   );
 }
 
 function isFamilyScopedAuthorized(auth: AuthContext, data: Record<string, unknown>): boolean {
   if (!isAuthorizedAppUser(auth)) return false;
-  const email = auth!.email.toLowerCase();
   return (
     data.ownerUid === auth!.uid ||
     (isBootstrappedAdmin(auth) && data.workspaceId === 'gmaths_main') ||
-    (typeof data.agentEmail === 'string' && data.agentEmail.length >= 3 && data.agentEmail === email) ||
-    (typeof data.parentEmail === 'string' && data.parentEmail.length >= 3 && data.parentEmail === email) ||
-    (typeof data.parentAuthEmail === 'string' && data.parentAuthEmail.length >= 3 && data.parentAuthEmail === email)
+    matchesAgentEmail(auth, data.agentEmail) ||
+    matchesParentEmail(auth, data.parentEmail) ||
+    matchesParentEmail(auth, data.parentAuthEmail)
   );
 }
 
@@ -411,7 +451,7 @@ function evaluateRule(
       if (isBootstrappedAdmin(auth)) return 'ALLOW';
       const selfSignupOk =
         incoming.ownerUid === auth!.uid &&
-        incoming.email === auth!.email.toLowerCase() &&
+        matchesAgentEmail(auth, incoming.email) &&
         incoming.approvalStatus === 'pending' &&
         incoming.isActive === false &&
         incoming.commissionRate === 0 &&
@@ -625,6 +665,43 @@ function evaluateRule(
 
   if (col === 'practiceSessions' && op === 'update') {
     return 'PERMISSION_DENIED';
+  }
+
+  if (col === 'portalLogin') {
+    if (op === 'get') {
+      return isValidPortalLoginToken(docId) ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
+    if (op === 'list') {
+      return 'PERMISSION_DENIED';
+    }
+    if ((op === 'create' || op === 'update') && incoming) {
+      const req = [
+        'token', 'role', 'accountId', 'phoneDigits', 'authEmail',
+        'displayName', 'workspaceId', 'ownerUid', 'updatedAt',
+      ];
+      const allowed = [...req, 'legacyAuthEmail'];
+      const validShape =
+        isAuthorizedAppUser(auth) &&
+        isValidPortalLoginToken(docId) &&
+        hasAllowedKeys(incoming, req, allowed) &&
+        incoming.token === docId &&
+        (incoming.role === 'agent' || incoming.role === 'parent') &&
+        isValidId(incoming.accountId) &&
+        typeof incoming.phoneDigits === 'string' &&
+        /^[0-9]{7,15}$/.test(incoming.phoneDigits) &&
+        typeof incoming.authEmail === 'string' &&
+        /^(agent|parent)\.[0-9]{7,15}\.[a-f0-9]{6,16}@gmaths\.local$/.test(incoming.authEmail) &&
+        incoming.updatedAt === SERVER_TIME &&
+        (incoming.ownerUid === auth!.uid || isBootstrappedAdmin(auth));
+      if (!validShape) return 'PERMISSION_DENIED';
+      if (isBootstrappedAdmin(auth)) return 'ALLOW';
+      if (incoming.role === 'agent') {
+        const agDoc = dbState.agents[String(incoming.accountId)];
+        return agDoc && isAgentAuthorized(auth, agDoc) ? 'ALLOW' : 'PERMISSION_DENIED';
+      }
+      const parDoc = dbState.parents[String(incoming.accountId)];
+      return parDoc && isParentRecordAuthorized(auth, parDoc) ? 'ALLOW' : 'PERMISSION_DENIED';
+    }
   }
 
   return 'PERMISSION_DENIED';
@@ -1055,6 +1132,116 @@ const tests: Array<{ name: string; expected: 'ALLOW' | 'PERMISSION_DENIED'; run:
         password: 'initialpass123',
       });
       return parUpdate === 'ALLOW' && agCreatePar === 'ALLOW' ? 'ALLOW' : 'PERMISSION_DENIED';
+    },
+  },
+  {
+    name: 'DD-25 PortalLogin List & Short Token Get Blocked',
+    expected: 'PERMISSION_DENIED',
+    run: () => {
+      const listRes = evaluateRule(null, 'portalLogin', 'list', '');
+      const shortGet = evaluateRule(null, 'portalLogin', 'get', 'not_64_hex');
+      return listRes === 'PERMISSION_DENIED' && shortGet === 'PERMISSION_DENIED'
+        ? 'PERMISSION_DENIED'
+        : 'ALLOW';
+    },
+  },
+  {
+    name: 'DD-26 Unauthorized User Cannot Overwrite Another Account PortalLogin Index',
+    expected: 'PERMISSION_DENIED',
+    run: () =>
+      evaluateRule(
+        { uid: 'attacker_uid', email: 'attacker@example.com', email_verified: true },
+        'portalLogin',
+        'create',
+        'c'.repeat(64),
+        {
+          token: 'c'.repeat(64),
+          role: 'agent',
+          accountId: 'ag_phone',
+          phoneDigits: '9876501234',
+          authEmail: 'agent.9876501234.cccccccc@gmaths.local',
+          displayName: 'Hijacked Agent',
+          workspaceId: 'gmaths_main',
+          ownerUid: 'attacker_uid',
+          updatedAt: SERVER_TIME,
+        }
+      ),
+  },
+  {
+    name: 'VALID-12 Unauthenticated Exact 64-Hex PortalLogin Get Allowed Without PII Leak',
+    expected: 'ALLOW',
+    run: () => evaluateRule(null, 'portalLogin', 'get', 'a'.repeat(64)),
+  },
+  {
+    name: 'VALID-13 Versioned Phone+Password Agent Reads Canonical Profile & Updates PortalLogin',
+    expected: 'ALLOW',
+    run: () => {
+      const versionedAgentAuth = {
+        uid: 'mobile_device_uid',
+        email: 'agent.9876501234.aaaaaaaa@gmaths.local',
+        email_verified: false,
+        sign_in_provider: 'password' as const,
+      };
+      const agentRead = evaluateRule(versionedAgentAuth, 'agents', 'get', 'ag_phone');
+      const parentRead = evaluateRule(versionedAgentAuth, 'parents', 'get', 'par_phone');
+      const childRead = evaluateRule(versionedAgentAuth, 'children', 'get', 'ch_phone');
+      const portalSync = evaluateRule(
+        versionedAgentAuth,
+        'portalLogin',
+        'create',
+        'd'.repeat(64),
+        {
+          token: 'd'.repeat(64),
+          role: 'agent',
+          accountId: 'ag_phone',
+          phoneDigits: '9876501234',
+          authEmail: 'agent.9876501234.dddddddd@gmaths.local',
+          displayName: 'Phone Agent',
+          workspaceId: 'gmaths_main',
+          ownerUid: 'mobile_device_uid',
+          updatedAt: SERVER_TIME,
+        }
+      );
+      return agentRead === 'ALLOW' &&
+        parentRead === 'ALLOW' &&
+        childRead === 'ALLOW' &&
+        portalSync === 'ALLOW'
+        ? 'ALLOW'
+        : 'PERMISSION_DENIED';
+    },
+  },
+  {
+    name: 'VALID-14 Versioned Phone+Password Parent Reads Own Profile, Child & Syncs PortalLogin',
+    expected: 'ALLOW',
+    run: () => {
+      const versionedParentAuth = {
+        uid: 'parent_mobile_uid',
+        email: 'parent.9811223344.bbbbbbbb@gmaths.local',
+        email_verified: false,
+        sign_in_provider: 'password' as const,
+      };
+      const parentRead = evaluateRule(versionedParentAuth, 'parents', 'get', 'par_phone');
+      const childRead = evaluateRule(versionedParentAuth, 'children', 'get', 'ch_phone');
+      const portalSync = evaluateRule(
+        versionedParentAuth,
+        'portalLogin',
+        'create',
+        'e'.repeat(64),
+        {
+          token: 'e'.repeat(64),
+          role: 'parent',
+          accountId: 'par_phone',
+          phoneDigits: '9811223344',
+          authEmail: 'parent.9811223344.eeeeeeee@gmaths.local',
+          displayName: 'Phone Parent',
+          workspaceId: 'gmaths_main',
+          ownerUid: 'parent_mobile_uid',
+          updatedAt: SERVER_TIME,
+        }
+      );
+      return parentRead === 'ALLOW' && childRead === 'ALLOW' && portalSync === 'ALLOW'
+        ? 'ALLOW'
+        : 'PERMISSION_DENIED';
     },
   },
 ];
